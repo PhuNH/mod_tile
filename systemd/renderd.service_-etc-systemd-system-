@@ -1,0 +1,14 @@
+[Unit]
+Description=renderd service
+After=systemd-tmpfiles-setup.service postgresql.target
+Requires=systemd-tmpfiles-setup.service
+
+[Service]
+Type=forking
+PIDFile=/run/renderd/renderd.pid
+User=phunh
+ExecStart=/usr/local/bin/renderd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
