@@ -1,3 +1,7 @@
+*.kdev4
+/compile
+.dirstamp
+
 Makefile*
 *.o
 *.la

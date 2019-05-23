@@ -31,6 +31,9 @@
 #include "cache_expire.h"
 #include "parameterize_style.hpp"
 
+#include <gdal.h>
+#include <ogrsf_frmts.h>
+
 #ifdef HTCP_EXPIRE_CACHE
 #include <sys/socket.h>
 #include <netdb.h>
@@ -331,6 +334,62 @@ void render_init(const char *plugins_dir, const char* font_dir, int font_dir_rec
     mapnik::datasource_cache::instance()->register_datasources(plugins_dir);
 #endif
     load_fonts(font_dir, font_dir_recurse);
+    
+    GDALAllRegister();
+}
+
+void loadShapefile(Map& m, const char * filePath, const std::string srs) {
+    const int colorCount = 256;
+    
+    GDALDataset * poDS = (GDALDataset *) GDALOpenEx(filePath, GDAL_OF_VECTOR, NULL, NULL, NULL);
+    OGRLayer * poLayer = poDS->GetLayer(0);
+    std::vector<double> myData = std::vector<double>();
+    for (auto& poFeature: poLayer)
+        myData.push_back(poFeature->GetFieldAsDouble(0));
+    
+    double  maxData = *std::max_element(std::begin(myData), std::end(myData)),
+            minData = *std::min_element(std::begin(myData), std::end(myData));
+    double rangeOneColor = (maxData - minData) / colorCount;
+    std::vector<double> stops = std::vector<double>(colorCount+1);
+    for (int iStop = 0; iStop < colorCount+1; iStop++)
+        stops[iStop] = minData + iStop * rangeOneColor;
+    stops[0] -= 1;
+    stops[colorCount] += 1;
+    
+    feature_type_style s;
+    for (int iColor = 0; iColor < colorCount; iColor++) {
+        rule r;
+        std::ostringstream stringStream;
+        stringStream << "[Data] >= " << stops[iColor] << " and [Data] < " << stops[iColor+1];
+        expression_ptr f = parse_expression(stringStream.str());
+        r.set_filter(f);
+        polygon_symbolizer psym;
+        psym.properties[keys::fill] = color(100, 100, 100);
+        //psym.properties[keys::fill_opacity] = static_cast<double>(iColor+1) / colorCount;
+        r.append(std::move(psym));
+        s.add_rule(std::move(r));
+    }
+    m.insert_style("data_style", std::move(s));
+    
+    parameters p;
+    p["type"] = "shape";
+    p["file"] = filePath;
+    std::shared_ptr<datasource> ds = datasource_cache::instance().create(p);
+    layer l("data_layer");
+    l.set_srs(srs);
+    l.set_datasource(ds);
+    l.add_style("data_style");
+    m.add_layer(l);
+    
+    for (long unsigned int lr_idx = 0; lr_idx < m.layer_count(); lr_idx++) {
+        if (m.get_layer(lr_idx).name().compare("data_layer") == 0) {
+            layer lr = m.get_layer(lr_idx);
+            parameters pa = lr.datasource()->params();
+            syslog(LOG_INFO, "layer active '%d' queryable '%d' styles size '%zu' style 0 name '%s'", lr.active(), lr.queryable(), lr.styles().size(), lr.styles()[0].c_str());
+            for (parameters::iterator it=pa.begin(); it!=pa.end(); ++it)
+                syslog(LOG_INFO, "layer param '%s'", it->first.c_str());
+        }
+    }
 }
 
 void *render_thread(void * arg)
@@ -339,6 +398,9 @@ void *render_thread(void * arg)
     xmlmapconfig maps[XMLCONFIGS_MAX];
     int i,iMaxConfigs;
     int render_time;
+
+    const char * shapefilePath = "/mnt/d/Projects/TUM/OpenSeisMap/data/seis_cells.shp";
+    const std::string srs_merc = "+init=epsg:3857";
 
     for (iMaxConfigs = 0; iMaxConfigs < XMLCONFIGS_MAX; ++iMaxConfigs) {
         if (parentxmlconfig[iMaxConfigs].xmlname[0] == 0 || parentxmlconfig[iMaxConfigs].xmlfile[0] == 0) break;
@@ -359,6 +421,8 @@ void *render_thread(void * arg)
 
             try {
                 mapnik::load_map(maps[iMaxConfigs].map, maps[iMaxConfigs].xmlfile);
+                // Add a layer from a shapefile
+                loadShapefile(maps[iMaxConfigs].map, shapefilePath, srs_merc);
                 /* If we have more than 10 rendering threads configured, we need to fix
                  * up the mapnik datasources to support larger postgres connection pools
                  */
