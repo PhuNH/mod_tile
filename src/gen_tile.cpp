@@ -338,7 +338,32 @@ void render_init(const char *plugins_dir, const char* font_dir, int font_dir_rec
     GDALAllRegister();
 }
 
-void loadShapefile(Map& m, const char * filePath, const std::string srs) {
+color get_color_in_scale(double v, double vmin, double vmax) {
+    color c = color(255, 255, 255); // white
+    double dv;
+    
+    if (v < vmin) v = vmin;
+    if (v > vmax) v = vmax;
+    dv = vmax - vmin;
+    
+    if (v < (vmin + 0.25 * dv)) {
+        c.set_red(0);
+        c.set_green(static_cast<std::uint8_t> (4 * (v - vmin) / dv * 255));
+    } else if (v < (vmin + 0.5 * dv)) {
+        c.set_red(0);
+        c.set_blue(static_cast<std::uint8_t> ((1 + 4 * (vmin + 0.25 * dv - v) / dv) * 255));
+    } else if (v < (vmin + 0.75 * dv)) {
+        c.set_red(static_cast<std::uint8_t> (4 * (v - vmin - 0.5 * dv) / dv * 255));
+        c.set_blue(0);
+    } else {
+        c.set_green(static_cast<std::uint8_t> ((1 + 4 * (vmin + 0.75 * dv - v) / dv) * 255));
+        c.set_blue(0);
+    }
+    
+    return(c);
+}
+
+void load_shapefile(Map& m, const char * filePath, const std::string srs) {
     const int colorCount = 256;
     
     GDALDataset * poDS = (GDALDataset *) GDALOpenEx(filePath, GDAL_OF_VECTOR, NULL, NULL, NULL);
@@ -351,10 +376,13 @@ void loadShapefile(Map& m, const char * filePath, const std::string srs) {
             minData = *std::min_element(std::begin(myData), std::end(myData));
     double rangeOneColor = (maxData - minData) / colorCount;
     std::vector<double> stops = std::vector<double>(colorCount+1);
-    for (int iStop = 0; iStop < colorCount+1; iStop++)
+    std::vector<color> colors = std::vector<color>(colorCount);
+    for (int iStop = 0; iStop < colorCount; iStop++) {
         stops[iStop] = minData + iStop * rangeOneColor;
+        colors[iStop] = get_color_in_scale(stops[iStop], minData, maxData - rangeOneColor);
+    }
     stops[0] -= 1;
-    stops[colorCount] += 1;
+    stops[colorCount] = maxData + 1;
     
     feature_type_style s;
     for (int iColor = 0; iColor < colorCount; iColor++) {
@@ -364,7 +392,7 @@ void loadShapefile(Map& m, const char * filePath, const std::string srs) {
         expression_ptr f = parse_expression(stringStream.str());
         r.set_filter(f);
         polygon_symbolizer psym;
-        psym.properties[keys::fill] = color(100, 100, 100);
+        psym.properties[keys::fill] = colors[iColor];
         //psym.properties[keys::fill_opacity] = static_cast<double>(iColor+1) / colorCount;
         r.append(std::move(psym));
         s.add_rule(std::move(r));
@@ -422,7 +450,7 @@ void *render_thread(void * arg)
             try {
                 mapnik::load_map(maps[iMaxConfigs].map, maps[iMaxConfigs].xmlfile);
                 // Add a layer from a shapefile
-                loadShapefile(maps[iMaxConfigs].map, shapefilePath, srs_merc);
+                load_shapefile(maps[iMaxConfigs].map, shapefilePath, srs_merc);
                 /* If we have more than 10 rendering threads configured, we need to fix
                  * up the mapnik datasources to support larger postgres connection pools
                  */
