@@ -20,6 +20,7 @@
 #include <pthread.h>
 #include <string>
 #include <stdlib.h>
+#include <cmath>
 
 #include "gen_tile.h"
 #include "render_config.h"
@@ -33,6 +34,14 @@
 
 #include <gdal.h>
 #include <ogrsf_frmts.h>
+
+#if SYSTEM_LIBINIPARSER
+    #include <iniparser.h>
+#else
+    extern "C" {
+        #include "iniparser3.0b/src/iniparser.h"
+    }
+#endif
 
 #ifdef HTCP_EXPIRE_CACHE
 #include <sys/socket.h>
@@ -90,6 +99,7 @@ struct xmlmapconfig {
     char xmluri[PATH_MAX];
     char host[PATH_MAX];
     char htcphost[PATH_MAX];
+    char shp_ini[PATH_MAX];
     int htcpsock;
     int tilesize;
     double scale;
@@ -99,6 +109,14 @@ struct xmlmapconfig {
     parameterize_function_ptr parameterize_function; 
     xmlmapconfig() :
         map(256,256) {}
+};
+
+struct shpmapconfig {
+    char name[XMLCONFIG_MAX];
+    char file[PATH_MAX];
+    char srs[PATH_MAX];
+    int minzoom;
+    int maxzoom;
 };
 
 
@@ -363,61 +381,128 @@ color get_color_in_scale(double v, double vmin, double vmax) {
     return(c);
 }
 
-void load_shapefile(Map& m, const char * filePath, const std::string srs) {
+void load_shapefile(Map& m, shpmapconfig shpconf) {
     const int colorCount = 256;
+    const int maxScaleDenom = 559082264;
     
-    GDALDataset * poDS = (GDALDataset *) GDALOpenEx(filePath, GDAL_OF_VECTOR, NULL, NULL, NULL);
-    OGRLayer * poLayer = poDS->GetLayer(0);
-    std::vector<double> myData = std::vector<double>();
-    for (auto& poFeature: poLayer)
-        myData.push_back(poFeature->GetFieldAsDouble(0));
-    
-    double  maxData = *std::max_element(std::begin(myData), std::end(myData)),
-            minData = *std::min_element(std::begin(myData), std::end(myData));
-    double rangeOneColor = (maxData - minData) / colorCount;
-    std::vector<double> stops = std::vector<double>(colorCount+1);
-    std::vector<color> colors = std::vector<color>(colorCount);
-    for (int iStop = 0; iStop < colorCount; iStop++) {
-        stops[iStop] = minData + iStop * rangeOneColor;
-        colors[iStop] = get_color_in_scale(stops[iStop], minData, maxData - rangeOneColor);
-    }
-    stops[0] -= 1;
-    stops[colorCount] = maxData + 1;
-    
-    feature_type_style s;
-    for (int iColor = 0; iColor < colorCount; iColor++) {
-        rule r;
-        std::ostringstream stringStream;
-        stringStream << "[Data] >= " << stops[iColor] << " and [Data] < " << stops[iColor+1];
-        expression_ptr f = parse_expression(stringStream.str());
-        r.set_filter(f);
-        polygon_symbolizer psym;
-        psym.properties[keys::fill] = colors[iColor];
-        //psym.properties[keys::fill_opacity] = static_cast<double>(iColor+1) / colorCount;
-        r.append(std::move(psym));
-        s.add_rule(std::move(r));
-    }
-    m.insert_style("data_style", std::move(s));
-    
-    parameters p;
-    p["type"] = "shape";
-    p["file"] = filePath;
-    std::shared_ptr<datasource> ds = datasource_cache::instance().create(p);
-    layer l("data_layer");
-    l.set_srs(srs);
-    l.set_datasource(ds);
-    l.add_style("data_style");
-    m.add_layer(l);
-    
-    for (long unsigned int lr_idx = 0; lr_idx < m.layer_count(); lr_idx++) {
-        if (m.get_layer(lr_idx).name().compare("data_layer") == 0) {
-            layer lr = m.get_layer(lr_idx);
-            parameters pa = lr.datasource()->params();
-            syslog(LOG_INFO, "layer active '%d' queryable '%d' styles size '%zu' style 0 name '%s'", lr.active(), lr.queryable(), lr.styles().size(), lr.styles()[0].c_str());
-            for (parameters::iterator it=pa.begin(); it!=pa.end(); ++it)
-                syslog(LOG_INFO, "layer param '%s'", it->first.c_str());
+    if (strcmp(shpconf.file, "")) {
+        GDALDataset * poDS = (GDALDataset *) GDALOpenEx(shpconf.file, GDAL_OF_VECTOR, NULL, NULL, NULL);
+        OGRLayer * poLayer = poDS->GetLayer(0);
+        std::vector<double> myData = std::vector<double>();
+        for (auto& poFeature: poLayer)
+            myData.push_back(poFeature->GetFieldAsDouble(0));
+        
+        double  maxData = *std::max_element(std::begin(myData), std::end(myData)),
+                minData = *std::min_element(std::begin(myData), std::end(myData));
+        double rangeOneColor = (maxData - minData) / colorCount;
+        std::vector<double> stops = std::vector<double>(colorCount+1);
+        std::vector<color> colors = std::vector<color>(colorCount);
+        for (int iStop = 0; iStop < colorCount; iStop++) {
+            stops[iStop] = minData + iStop * rangeOneColor;
+            colors[iStop] = get_color_in_scale(stops[iStop], minData, maxData - rangeOneColor);
+        }
+        stops[0] -= 1;
+        stops[colorCount] = maxData + 1;
+        
+        std::ostringstream style_name, layer_name;
+        style_name << shpconf.name << " style";
+        layer_name << shpconf.name << " layer";
+        
+        feature_type_style s;
+        for (int iColor = 0; iColor < colorCount; iColor++) {
+            rule r;
+            std::ostringstream stringStream;
+            stringStream << "[Data] >= " << stops[iColor] << " and [Data] < " << stops[iColor+1];
+            expression_ptr f = parse_expression(stringStream.str());
+            r.set_filter(f);
+            polygon_symbolizer psym;
+            psym.properties[keys::fill] = colors[iColor];
+            psym.properties[keys::fill_opacity] = static_cast<double>(iColor+1) / colorCount;
+            r.append(std::move(psym));
+            s.add_rule(std::move(r));
+        }
+        m.insert_style(style_name.str(), std::move(s));
+        
+        parameters p;
+        p["type"] = "shape";
+        p["file"] = std::string(shpconf.file);
+        std::shared_ptr<datasource> ds = datasource_cache::instance().create(p);
+        layer l(layer_name.str());
+        l.set_maximum_scale_denominator(maxScaleDenom / std::pow(2, shpconf.minzoom));
+        l.set_minimum_scale_denominator(maxScaleDenom / std::pow(2, shpconf.maxzoom));
+        l.set_srs(shpconf.srs);
+        l.set_datasource(ds);
+        l.add_style(style_name.str());
+        m.add_layer(l);
+        
+        for (long unsigned int lr_idx = 0; lr_idx < m.layer_count(); lr_idx++) {
+            if (m.get_layer(lr_idx).name().compare(layer_name.str()) == 0) {
+                layer lr = m.get_layer(lr_idx);
+                parameters pa = lr.datasource()->params();
+                syslog(LOG_INFO, "layer active '%d' queryable '%d' styles size '%zu' style 0 name '%s'", lr.active(), lr.queryable(), lr.styles().size(), lr.styles()[0].c_str());
+                for (parameters::iterator it=pa.begin(); it!=pa.end(); ++it)
+                    syslog(LOG_INFO, "layer param '%s'", it->first.c_str());
+            }
         }
     }
+}
+
+void load_data_layers(Map& m, char * shp_ini) {
+    dictionary *ini = iniparser_load(shp_ini);
+    if (ini) {
+        int lr_count = iniparser_getnsec(ini);
+        shpmapconfig shps[lr_count];
+        syslog(LOG_INFO, "shp INI loaded '%s' with '%d' sections", shp_ini, lr_count);
+        char buffer[PATH_MAX];
+        for (int section = 0; section < lr_count; section++) {
+            char * name = iniparser_getsecname(ini, section);
+            if (strlen(name) >= XMLCONFIG_MAX - 1) {
+                syslog(LOG_ERR, "section name too long: %s", name);
+                request_exit();
+            }
+            strcpy(shps[section].name, name);
+            
+            sprintf(buffer, "%s:file", name);
+            char * shp_file = iniparser_getstring(ini, buffer, (char *)"");
+            if (strlen(shp_file) >= PATH_MAX - 1){
+                syslog(LOG_ERR, "shp file path too long: %s", shp_file);
+                request_exit();
+            }
+            strcpy(shps[section].file, shp_file);
+            
+            sprintf(buffer, "%s:srs", name);
+            char * srs = iniparser_getstring(ini, buffer, (char *)"+init=epsg:3857");
+            if (strlen(srs) >= PATH_MAX - 1) {
+                syslog(LOG_ERR, "srs string too long: %s", srs);
+                request_exit();
+            }
+            strcpy(shps[section].srs, srs);
+            
+            sprintf(buffer, "%s:maxzoom", name);
+            char * maxzoom = iniparser_getstring(ini, buffer, (char *)"20");
+            shps[section].maxzoom = atoi(maxzoom);
+            if (shps[section].maxzoom > MAX_ZOOM) {
+                syslog(LOG_ERR, "Specified max zoom (%i) is too large. Renderd currently only supports up to zoom level %i", shps[section].maxzoom, MAX_ZOOM);
+                request_exit();
+            }
+
+            sprintf(buffer, "%s:minzoom", name);
+            char * minzoom = iniparser_getstring(ini, buffer, (char *)"0");
+            shps[section].minzoom = atoi(minzoom);
+            if (shps[section].minzoom < 0) {
+                syslog(LOG_ERR, "Specified min zoom (%i) is too small. Minimum zoom level has to be greater than or equal to 0", shps[section].minzoom);
+                request_exit();
+            }
+            if (shps[section].minzoom > shps[section].maxzoom) {
+                syslog(LOG_ERR, "Specified min zoom (%i) is larger than max zoom (%i).", shps[section].minzoom, shps[section].maxzoom);
+                request_exit();
+            }
+            
+            // Add a layer from a shapefile
+            load_shapefile(m, shps[section]);
+        }
+    }
+    iniparser_freedict(ini);
 }
 
 void *render_thread(void * arg)
@@ -426,9 +511,6 @@ void *render_thread(void * arg)
     xmlmapconfig maps[XMLCONFIGS_MAX];
     int i,iMaxConfigs;
     int render_time;
-
-    const char * shapefilePath = "/mnt/d/Projects/TUM/OpenSeisMap/data/seis_cells.shp";
-    const std::string srs_merc = "+init=epsg:3857";
 
     for (iMaxConfigs = 0; iMaxConfigs < XMLCONFIGS_MAX; ++iMaxConfigs) {
         if (parentxmlconfig[iMaxConfigs].xmlname[0] == 0 || parentxmlconfig[iMaxConfigs].xmlfile[0] == 0) break;
@@ -440,6 +522,7 @@ void *render_thread(void * arg)
         maps[iMaxConfigs].minzoom = parentxmlconfig[iMaxConfigs].min_zoom;
         maps[iMaxConfigs].maxzoom = parentxmlconfig[iMaxConfigs].max_zoom;
         maps[iMaxConfigs].parameterize_function = init_parameterization_function(parentxmlconfig[iMaxConfigs].parameterization);
+        strcpy(maps[iMaxConfigs].shp_ini, parentxmlconfig[iMaxConfigs].shp_ini);
 
 
         if (maps[iMaxConfigs].store) {
@@ -449,8 +532,8 @@ void *render_thread(void * arg)
 
             try {
                 mapnik::load_map(maps[iMaxConfigs].map, maps[iMaxConfigs].xmlfile);
-                // Add a layer from a shapefile
-                load_shapefile(maps[iMaxConfigs].map, shapefilePath, srs_merc);
+                // Load all shapefiles to the map
+                load_data_layers(maps[iMaxConfigs].map, maps[iMaxConfigs].shp_ini);
                 /* If we have more than 10 rendering threads configured, we need to fix
                  * up the mapnik datasources to support larger postgres connection pools
                  */

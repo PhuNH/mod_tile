@@ -36,6 +36,7 @@ typedef struct {
     char htcpip[PATH_MAX];
     char tile_dir[PATH_MAX];
     char parameterization[PATH_MAX];
+    char shp_ini[PATH_MAX];
     int tile_px_size;
     double scale_factor;
     int min_zoom;

@@ -811,6 +811,14 @@ int main(int argc, char **argv)
             }
             strcpy(maps[iconf].parameterization, ini_parameterize);
 
+            sprintf(buffer, "%s:shpini", name);
+            char *ini_shpinipath = iniparser_getstring(ini, buffer, (char *)"");
+            if (strlen(ini_shpinipath) >= (PATH_MAX - 1)){
+                fprintf(stderr, "Shp INI path too long: %s\n", ini_shpinipath);
+                exit(7);
+            }
+            strcpy(maps[iconf].shp_ini, ini_shpinipath);
+
             /* Pass this information into the rendering threads,
              * as it is needed to configure mapniks number of connections
              */
@@ -980,6 +988,7 @@ int main(int argc, char **argv)
 
     process_loop(fd);
 
+    iniparser_freedict(ini);
     unlink(config.socketname);
     close(fd);
     return 0;
