@@ -114,7 +114,6 @@ struct xmlmapconfig {
 struct shpmapconfig {
     char name[XMLCONFIG_MAX];
     char file[PATH_MAX];
-    char srs[PATH_MAX];
     int minzoom;
     int maxzoom;
 };
@@ -428,20 +427,23 @@ void load_shapefile(Map& m, shpmapconfig shpconf) {
         p["file"] = std::string(shpconf.file);
         std::shared_ptr<datasource> ds = datasource_cache::instance().create(p);
         layer l(layer_name.str());
+        OGRSpatialReference *spatialRef = poLayer->GetSpatialRef();
+        char *pszProj4 = NULL;
+        spatialRef->exportToProj4(&pszProj4);
+        l.set_srs(pszProj4);
         l.set_maximum_scale_denominator(maxScaleDenom / std::pow(2, shpconf.minzoom));
         l.set_minimum_scale_denominator(maxScaleDenom / std::pow(2, shpconf.maxzoom));
-        l.set_srs(shpconf.srs);
         l.set_datasource(ds);
         l.add_style(style_name.str());
         m.add_layer(l);
+        
+        CPLFree(pszProj4);
         
         for (long unsigned int lr_idx = 0; lr_idx < m.layer_count(); lr_idx++) {
             if (m.get_layer(lr_idx).name().compare(layer_name.str()) == 0) {
                 layer lr = m.get_layer(lr_idx);
                 parameters pa = lr.datasource()->params();
                 syslog(LOG_INFO, "layer active '%d' queryable '%d' styles size '%zu' style 0 name '%s'", lr.active(), lr.queryable(), lr.styles().size(), lr.styles()[0].c_str());
-                for (parameters::iterator it=pa.begin(); it!=pa.end(); ++it)
-                    syslog(LOG_INFO, "layer param '%s'", it->first.c_str());
             }
         }
     }
@@ -469,14 +471,6 @@ void load_data_layers(Map& m, char * shp_ini) {
                 request_exit();
             }
             strcpy(shps[section].file, shp_file);
-            
-            sprintf(buffer, "%s:srs", name);
-            char * srs = iniparser_getstring(ini, buffer, (char *)"+init=epsg:3857");
-            if (strlen(srs) >= PATH_MAX - 1) {
-                syslog(LOG_ERR, "srs string too long: %s", srs);
-                request_exit();
-            }
-            strcpy(shps[section].srs, srs);
             
             sprintf(buffer, "%s:maxzoom", name);
             char * maxzoom = iniparser_getstring(ini, buffer, (char *)"20");
