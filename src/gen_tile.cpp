@@ -114,6 +114,7 @@ struct xmlmapconfig {
 struct shpmapconfig {
     char name[XMLCONFIG_MAX];
     char file[PATH_MAX];
+    double threshold;
     int minzoom;
     int maxzoom;
 };
@@ -400,7 +401,6 @@ void load_shapefile(Map& m, shpmapconfig shpconf) {
             stops[iStop] = minData + iStop * rangeOneColor;
             colors[iStop] = get_color_in_scale(stops[iStop], minData, maxData - rangeOneColor);
         }
-        stops[0] -= 1;
         stops[colorCount] = maxData + 1;
         
         std::ostringstream style_name, layer_name;
@@ -416,7 +416,8 @@ void load_shapefile(Map& m, shpmapconfig shpconf) {
             r.set_filter(f);
             polygon_symbolizer psym;
             psym.properties[keys::fill] = colors[iColor];
-            psym.properties[keys::fill_opacity] = static_cast<double>(iColor+1) / colorCount;
+            if (abs(stops[iColor]) >= shpconf.threshold) psym.properties[keys::fill_opacity] = 0.2 + 0.65 * (static_cast<double>(iColor+1) / colorCount);
+            else psym.properties[keys::fill_opacity] = 0;
             r.append(std::move(psym));
             s.add_rule(std::move(r));
         }
@@ -471,6 +472,10 @@ void load_data_layers(Map& m, char * shp_ini) {
                 request_exit();
             }
             strcpy(shps[section].file, shp_file);
+            
+            sprintf(buffer, "%s:threshold", name);
+            char * threshold = iniparser_getstring(ini, buffer, (char *)"0.0");
+            shps[section].threshold = atof(threshold);
             
             sprintf(buffer, "%s:maxzoom", name);
             char * maxzoom = iniparser_getstring(ini, buffer, (char *)"20");
