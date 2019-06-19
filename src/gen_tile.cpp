@@ -382,71 +382,95 @@ color get_color_in_scale(double v, double vmin, double vmax) {
     return(c);
 }
 
-void load_shapefile(Map& m, shpmapconfig shpconf) {
+void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos) {
     const int colorCount = 256;
     const int maxScaleDenom = 559082264;
     
+    std::string lvlStr = std::to_string(lvl);
+    std::string fileName(shpconf.file);
+    if (lvl != -1) fileName.replace(lvlPos, 2, lvlStr);
+    syslog(LOG_INFO, "use shapefile '%s'", fileName.c_str());
+    
+    GDALDataset * poDS = (GDALDataset *) GDALOpenEx(fileName.c_str(), GDAL_OF_VECTOR, NULL, NULL, NULL);
+    OGRLayer * poLayer = poDS->GetLayer(0);
+    std::vector<double> myData = std::vector<double>();
+    for (auto& poFeature: poLayer)
+        myData.push_back(poFeature->GetFieldAsDouble(0));
+    
+    double  maxData = *std::max_element(std::begin(myData), std::end(myData)),
+            minData = *std::min_element(std::begin(myData), std::end(myData));
+    double rangeOneColor = (maxData - minData) / colorCount;
+    std::vector<double> stops = std::vector<double>(colorCount+1);
+    std::vector<color> colors = std::vector<color>(colorCount);
+    for (int iStop = 0; iStop < colorCount; iStop++) {
+        stops[iStop] = minData + iStop * rangeOneColor;
+        colors[iStop] = get_color_in_scale(stops[iStop], minData, maxData - rangeOneColor);
+    }
+    stops[colorCount] = maxData + 1;
+    
+    std::ostringstream style_name, layer_name;
+    style_name << shpconf.name << "_style";
+    layer_name << shpconf.name << "_layer";
+    if (lvl != -1) {
+        style_name << "_" << lvlStr;
+        layer_name << "_" << lvlStr;
+    }
+    
+    feature_type_style s;
+    for (int iColor = 0; iColor < colorCount; iColor++) {
+        rule r;
+        std::ostringstream stringStream;
+        stringStream << "[Data] >= " << stops[iColor] << " and [Data] < " << stops[iColor+1];
+        expression_ptr f = parse_expression(stringStream.str());
+        r.set_filter(f);
+        polygon_symbolizer psym;
+        psym.properties[keys::fill] = colors[iColor];
+        if (stops[iColor] <= shpconf.upper || stops[iColor] >= shpconf.lower)
+            psym.properties[keys::fill_opacity] = 0.2 + 0.65 * (static_cast<double>(iColor+1) / colorCount);
+        else psym.properties[keys::fill_opacity] = 0;
+        r.append(std::move(psym));
+        s.add_rule(std::move(r));
+    }
+    m.insert_style(style_name.str(), std::move(s));
+    
+    parameters p;
+    p["type"] = "shape";
+    p["file"] = fileName;
+    std::shared_ptr<datasource> ds = datasource_cache::instance().create(p);
+    layer l(layer_name.str());
+    OGRSpatialReference *spatialRef = poLayer->GetSpatialRef();
+    char *pszProj4 = NULL;
+    spatialRef->exportToProj4(&pszProj4);
+    l.set_srs(pszProj4);
+    int maxLvl, minLvl;
+    maxLvl = lvl == -1? shpconf.maxzoom : lvl;
+    minLvl = lvl == -1? shpconf.minzoom : lvl;
+    l.set_maximum_scale_denominator(maxScaleDenom / std::pow(2, maxLvl));
+    l.set_minimum_scale_denominator(maxScaleDenom / std::pow(2, minLvl));
+    l.set_datasource(ds);
+    l.add_style(style_name.str());
+    m.add_layer(l);
+    
+    CPLFree(pszProj4);
+    
+    for (long unsigned int lr_idx = 0; lr_idx < m.layer_count(); lr_idx++) {
+        if (m.get_layer(lr_idx).name().compare(layer_name.str()) == 0) {
+            layer lr = m.get_layer(lr_idx);
+            parameters pa = lr.datasource()->params();
+            syslog(LOG_INFO, "layer '%s' active '%d' queryable '%d' styles size '%zu' style 0 name '%s'",
+                   lr.name().c_str(), lr.active(), lr.queryable(), lr.styles().size(), lr.styles()[0].c_str());
+        }
+    }
+}
+
+void load_shapefiles(Map& m, shpmapconfig shpconf) {
     if (strcmp(shpconf.file, "")) {
-        GDALDataset * poDS = (GDALDataset *) GDALOpenEx(shpconf.file, GDAL_OF_VECTOR, NULL, NULL, NULL);
-        OGRLayer * poLayer = poDS->GetLayer(0);
-        std::vector<double> myData = std::vector<double>();
-        for (auto& poFeature: poLayer)
-            myData.push_back(poFeature->GetFieldAsDouble(0));
-        
-        double  maxData = *std::max_element(std::begin(myData), std::end(myData)),
-                minData = *std::min_element(std::begin(myData), std::end(myData));
-        double rangeOneColor = (maxData - minData) / colorCount;
-        std::vector<double> stops = std::vector<double>(colorCount+1);
-        std::vector<color> colors = std::vector<color>(colorCount);
-        for (int iStop = 0; iStop < colorCount; iStop++) {
-            stops[iStop] = minData + iStop * rangeOneColor;
-            colors[iStop] = get_color_in_scale(stops[iStop], minData, maxData - rangeOneColor);
-        }
-        stops[colorCount] = maxData + 1;
-        
-        std::ostringstream style_name, layer_name;
-        style_name << shpconf.name << " style";
-        layer_name << shpconf.name << " layer";
-        
-        feature_type_style s;
-        for (int iColor = 0; iColor < colorCount; iColor++) {
-            rule r;
-            std::ostringstream stringStream;
-            stringStream << "[Data] >= " << stops[iColor] << " and [Data] < " << stops[iColor+1];
-            expression_ptr f = parse_expression(stringStream.str());
-            r.set_filter(f);
-            polygon_symbolizer psym;
-            psym.properties[keys::fill] = colors[iColor];
-            if (stops[iColor] <= shpconf.upper || stops[iColor] >= shpconf.lower)
-                psym.properties[keys::fill_opacity] = 0.2 + 0.65 * (static_cast<double>(iColor+1) / colorCount);
-            else psym.properties[keys::fill_opacity] = 0;
-            r.append(std::move(psym));
-            s.add_rule(std::move(r));
-        }
-        m.insert_style(style_name.str(), std::move(s));
-        
-        parameters p;
-        p["type"] = "shape";
-        p["file"] = std::string(shpconf.file);
-        std::shared_ptr<datasource> ds = datasource_cache::instance().create(p);
-        layer l(layer_name.str());
-        OGRSpatialReference *spatialRef = poLayer->GetSpatialRef();
-        char *pszProj4 = NULL;
-        spatialRef->exportToProj4(&pszProj4);
-        l.set_srs(pszProj4);
-        l.set_maximum_scale_denominator(maxScaleDenom / std::pow(2, shpconf.minzoom));
-        l.set_minimum_scale_denominator(maxScaleDenom / std::pow(2, shpconf.maxzoom));
-        l.set_datasource(ds);
-        l.add_style(style_name.str());
-        m.add_layer(l);
-        
-        CPLFree(pszProj4);
-        
-        for (long unsigned int lr_idx = 0; lr_idx < m.layer_count(); lr_idx++) {
-            if (m.get_layer(lr_idx).name().compare(layer_name.str()) == 0) {
-                layer lr = m.get_layer(lr_idx);
-                parameters pa = lr.datasource()->params();
-                syslog(LOG_INFO, "layer active '%d' queryable '%d' styles size '%zu' style 0 name '%s'", lr.active(), lr.queryable(), lr.styles().size(), lr.styles()[0].c_str());
+        std::size_t lvlPos = std::string(shpconf.file).find("{}");
+        if (lvlPos == std::string::npos) {
+            load_shapefile(m, shpconf, -1, lvlPos);
+        } else {
+            for (int lvl = shpconf.minzoom; lvl <= shpconf.maxzoom; lvl++) {
+                load_shapefile(m, shpconf, lvl, lvlPos);
             }
         }
     }
@@ -506,7 +530,7 @@ void load_data_layers(Map& m, char * shp_ini) {
             }
             
             // Add a layer from a shapefile
-            load_shapefile(m, shps[section]);
+            load_shapefiles(m, shps[section]);
         }
     }
     iniparser_freedict(ini);
