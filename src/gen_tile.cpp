@@ -445,30 +445,23 @@ void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos) {
     int maxLvl, minLvl;
     maxLvl = lvl == -1? shpconf.maxzoom : lvl;
     minLvl = lvl == -1? shpconf.minzoom : lvl;
-    l.set_maximum_scale_denominator(maxScaleDenom / std::pow(2, maxLvl));
-    l.set_minimum_scale_denominator(maxScaleDenom / std::pow(2, minLvl));
+    l.set_maximum_scale_denominator(maxScaleDenom / std::pow(2, minLvl) * 1.5);
+    l.set_minimum_scale_denominator(maxScaleDenom / std::pow(2, maxLvl) * 0.75);
     l.set_datasource(ds);
     l.add_style(style_name.str());
     m.add_layer(l);
     
     CPLFree(pszProj4);
-    
-    for (long unsigned int lr_idx = 0; lr_idx < m.layer_count(); lr_idx++) {
-        if (m.get_layer(lr_idx).name().compare(layer_name.str()) == 0) {
-            layer lr = m.get_layer(lr_idx);
-            parameters pa = lr.datasource()->params();
-            syslog(LOG_INFO, "layer '%s' active '%d' queryable '%d' styles size '%zu' style 0 name '%s'",
-                   lr.name().c_str(), lr.active(), lr.queryable(), lr.styles().size(), lr.styles()[0].c_str());
-        }
-    }
 }
 
 void load_shapefiles(Map& m, shpmapconfig shpconf) {
     if (strcmp(shpconf.file, "")) {
         std::size_t lvlPos = std::string(shpconf.file).find("{}");
         if (lvlPos == std::string::npos) {
+            syslog(LOG_INFO, "load 1 shapefile");
             load_shapefile(m, shpconf, -1, lvlPos);
         } else {
+            syslog(LOG_INFO, "load %d shapefiles", shpconf.maxzoom - shpconf.minzoom + 1);
             for (int lvl = shpconf.minzoom; lvl <= shpconf.maxzoom; lvl++) {
                 load_shapefile(m, shpconf, lvl, lvlPos);
             }
@@ -531,6 +524,25 @@ void load_data_layers(Map& m, char * shp_ini) {
             
             // Add a layer from a shapefile
             load_shapefiles(m, shps[section]);
+            
+            if (!strcmp(shps[section].name, "sumatra")) {
+                shpmapconfig shpconf = shps[section];
+                std::size_t lvlPos = std::string(shpconf.file).find("{}");
+                if (lvlPos == std::string::npos) {
+                    std::ostringstream style_name, layer_name;
+                    style_name << shpconf.name << "_style";
+                    layer_name << shpconf.name << "_layer";
+                
+                    for (long unsigned int lr_idx = 0; lr_idx < m.layer_count(); lr_idx++) {
+                        if (m.get_layer(lr_idx).name().compare(layer_name.str()) == 0) {
+                            layer lr = m.get_layer(lr_idx);
+                            parameters pa = lr.datasource()->params();
+                            syslog(LOG_INFO, "layer '%s' active '%d' queryable '%d' styles size '%zu' style 0 name '%s' max denom. '%f' min denom. '%f'",
+                                lr.name().c_str(), lr.active(), lr.queryable(), lr.styles().size(), lr.styles()[0].c_str(), lr.maximum_scale_denominator(), lr.minimum_scale_denominator());
+                        }
+                    }
+                }
+            }
         }
     }
     iniparser_freedict(ini);
