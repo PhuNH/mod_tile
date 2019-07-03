@@ -34,6 +34,8 @@
 
 #include <gdal.h>
 #include <ogrsf_frmts.h>
+#include <vtk/vtkSmartPointer.h>
+#include <vtk/vtkColorTransferFunction.h>
 
 #if SYSTEM_LIBINIPARSER
     #include <iniparser.h>
@@ -357,15 +359,77 @@ void render_init(const char *plugins_dir, const char* font_dir, int font_dir_rec
     GDALAllRegister();
 }
 
-color get_color_in_scale(double v, double vmin, double vmax) {
-    color c = color(255, 255, 255); // white
-    double dv;
+int sign(double v) {
+    return (v > 0) - (v < 0);
+}
+
+double get_color_val(double dv, double minDiff, int index, double * pts, double * colorArr) {
+    int colorRangeSign = sign(colorArr[index+1] - colorArr[index]);
+    double ptRange = pts[index+1] - pts[index];
+    double colorVal = colorArr[index] + colorRangeSign * (minDiff - pts[index] * dv) / (ptRange * dv);
+    return colorVal;
+}
+
+color get_color_in_scale(int index, int colorCount, vtkSmartPointer<vtkColorTransferFunction> ctf) {
+    /*int pointCount = 5;
+    double *pts, *Rs, *Gs, *Bs;
+    if (!strcmp(scale, "Rainbow")) {
+        pts = new double[5] {0, 0.25, 0.5, 0.75, 1};
+        Rs = new double[5] {0, 0, 0, 1, 1};
+        Gs = new double[5] {0, 1, 1, 1, 0};
+        Bs = new double[5] {1, 1, 0, 0, 0};
+    } else if (!strcmp(scale, "GreyRainbow")) {
+        pointCount = 6;
+        pts = new double[6] {0, 0.005, 0.25, 0.5, 0.75, 1};
+        Rs = new double[6] {1, 1, 0, 0, 1, 1};
+        Gs = new double[6] {1, 1, 1, 1, 1, 0};
+        Bs = new double[6] {1, 1, 1, 0, 0, 0};
+    } else if (!strcmp(scale, "RainbowInv")) {
+        pts = new double[5] {0, 0.25, 0.5, 0.75, 1};
+        Rs = new double[5] {1, 1, 0, 0, 0};
+        Gs = new double[5] {0, 1, 1, 1, 0};
+        Bs = new double[5] {0, 0, 0, 1, 1};
+    } else if (!strcmp(scale, "SeisSol")) {
+        pts = new double[5] {0, 0.25, 0.5, 0.75, 1};
+        Rs = new double[5] {1, 0, 0, 1, 1};
+        Gs = new double[5] {1, 1, 0, 0.317647, 0};
+        Bs = new double[5] {1, 1, 1, 0, 0};
+    } else if (!strcmp(scale, "Kaikoura")) {
+        pointCount = 3;
+        pts = new double[3] {0, 0.01, 1};
+        Rs = new double[3] {1, 92.0 / 255, 196.0 / 255};
+        Gs = new double[3] {1, 190.0 / 255, 119.0 / 255};
+        Bs = new double[3] {1, 215.0 / 255, 87.0 / 255};
+    } else {
+        //pointCount = 3;
+        //pts = new double[3] {0, 0.5, 1};
+        //Rs = new double[3] {58.0 / 256, 221.0 / 256, 180.0 / 256};
+        //Gs = new double[3] {76.0 / 256, 222.0 / 256, 4.0 / 256};
+        //Bs = new double[3] {193.0 / 256, 222.0 / 256, 38.0 / 256};
+        //pointCount = 33;
+        //pts = new double[33] {0.0, 0.03125, 0.0625, 0.09375, 0.125, 0.15625, 0.1875, 0.21875, 0.25, 0.28125, 0.3125, 0.34375, 0.375, 0.40625, 0.4375, 0.46875, 0.5, 0.53125, 0.5625, 0.59375, 0.625, 0.65625, 0.6875, 0.71875, 0.75, 0.78125, 0.8125, 0.84375, 0.875, 0.90625, 0.9375, 0.96875, 1.0};
+        //Rs = new double[33] {59, 68, 77, 87, 98, 108, 119, 130, 141, 152, 163, 174, 184, 194, 204, 213, 221, 229, 236, 241, 245, 247, 247, 247, 244, 241, 236, 229, 222, 213, 203, 192, 180};
+        //Gs = new double[33] {76, 90, 104, 117, 130, 142, 154, 165, 176, 185, 194, 201, 208, 213, 217, 219, 221, 216, 211, 204, 196, 187, 177, 166, 154, 141, 127, 112, 96, 80, 62, 40, 4};
+        //Bs = new double[33] {192, 204, 215, 225, 234, 241, 247, 251, 254, 255, 255, 253, 249, 244, 238, 230, 221, 209, 197, 185, 173, 160, 148, 135, 123, 111, 99, 88, 77, 66, 56, 47, 38};
+    }
     
     if (v < vmin) v = vmin;
     if (v > vmax) v = vmax;
-    dv = vmax - vmin;
+    double  minDiff = v - vmin,
+            dv = vmax - vmin;
     
-    if (v < (vmin + 0.25 * dv)) {
+    int i;
+    for (i = pointCount - 2; i >= 0; i--) {
+        if (minDiff / dv >= pts[i])
+            break;
+    }
+    
+    color c = color(); // white
+    c.set_red(static_cast<std::uint8_t> (get_color_val(dv, minDiff, i, pts, Rs) * 255));
+    c.set_green(static_cast<std::uint8_t> (get_color_val(dv, minDiff, i, pts, Gs) * 255));
+    c.set_blue(static_cast<std::uint8_t> (get_color_val(dv, minDiff, i, pts, Bs) * 255));*/
+    
+    /*if (v < (vmin + 0.25 * dv)) {
         c.set_red(0);
         c.set_green(static_cast<std::uint8_t> (4 * (v - vmin) / dv * 255));
     } else if (v < (vmin + 0.5 * dv)) {
@@ -377,9 +441,62 @@ color get_color_in_scale(double v, double vmin, double vmax) {
     } else {
         c.set_green(static_cast<std::uint8_t> ((1 + 4 * (vmin + 0.75 * dv - v) / dv) * 255));
         c.set_blue(0);
-    }
+    }*/
+    
+    double rgb[3];
+    ctf->GetColor(1.0 * index / (colorCount - 1), rgb);
+    
+    color c = color();
+    c.set_red(static_cast<std::uint8_t> (rgb[0] * 255));
+    c.set_green(static_cast<std::uint8_t> (rgb[1] * 255));
+    c.set_blue(static_cast<std::uint8_t> (rgb[2] * 255));
     
     return(c);
+}
+
+void build_ctf(vtkSmartPointer<vtkColorTransferFunction>& ctf, const char *colorScale) {
+    if (!strcmp(colorScale, "Rainbow")) {
+        ctf->SetColorSpaceToRGB();
+        ctf->AddRGBPoint(0.00, 0.0, 0.0, 1.0);
+        ctf->AddRGBPoint(0.25, 0.0, 1.0, 1.0);
+        ctf->AddRGBPoint(0.5, 0.0, 1.0, 0.0);
+        ctf->AddRGBPoint(0.75, 1.0, 1.0, 0.0);
+        ctf->AddRGBPoint(1.0, 1.0, 0.0, 0.0);
+    } else if (!strcmp(colorScale, "GreyRainbow")) {
+        ctf->SetColorSpaceToRGB();
+        ctf->AddRGBPoint(0.0, 1.0, 1.0, 1.0);
+        ctf->AddRGBPoint(0.005, 1.0, 1.0, 1.0);
+        ctf->AddRGBPoint(0.25, 0.0, 1.0, 1.0);
+        ctf->AddRGBPoint(0.5, 0.0, 1.0, 0.0);
+        ctf->AddRGBPoint(0.75, 1.0, 1.0, 0.0);
+        ctf->AddRGBPoint(1.0, 1.0, 0.0, 0.0);
+    } else if (!strcmp(colorScale, "RainbowInv")) {
+        ctf->SetColorSpaceToRGB();
+        ctf->AddRGBPoint(0.0, 1.0, 0.0, 0.0);
+        ctf->AddRGBPoint(0.25, 1.0, 1.0, 0.0);
+        ctf->AddRGBPoint(0.5, 0.0, 1.0, 0.0);
+        ctf->AddRGBPoint(0.75, 0.0, 1.0, 1.0);
+        ctf->AddRGBPoint(1.00, 0.0, 0.0, 1.0);
+    } else if (!strcmp(colorScale, "SeisSol")) {
+        ctf->SetColorSpaceToRGB();
+        ctf->AddRGBPoint(0.0, 1.0, 1.0, 1.0);
+        ctf->AddRGBPoint(0.25, 0.0, 1.0, 1.0);
+        ctf->AddRGBPoint(0.5, 0.0, 0.0, 1.0);
+        ctf->AddRGBPoint(0.75, 1.0, 0.317647, 0.0);
+        ctf->AddRGBPoint(1.0, 1.0, 0.0, 0.0);
+    } else if (!strcmp(colorScale, "Kaikoura")) {
+        ctf->SetColorSpaceToRGB();
+        ctf->AddRGBPoint(0.0, 1.0, 1.0, 1.0);
+        ctf->AddRGBPoint(0.01, 92.0/255, 190.0/255, 215.0/255);
+        ctf->AddRGBPoint(1.0, 196.0/255, 119.0/255, 87.0/255);
+    } else { // "Diverging"
+        ctf->SetColorSpaceToDiverging();
+        ctf->AddRGBPoint(0.0, 58.0/256.0, 76.0/256.0, 193.0/256.0);
+        ctf->AddRGBPoint(0.5, 221.0/256.0, 222.0/256.0, 222.0/256.0);
+        ctf->AddRGBPoint(1.0, 180.0/256.0, 4.0/256.0, 38.0/256.0);
+    }
+    
+    ctf->SetNanColor(0.7, 0.7, 0.7);
 }
 
 void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos) {
@@ -402,9 +519,14 @@ void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos) {
     double rangeOneColor = (maxData - minData) / colorCount;
     std::vector<double> stops = std::vector<double>(colorCount+1);
     std::vector<color> colors = std::vector<color>(colorCount);
+    
+    std::string colorScale("Rainbow");
+    vtkSmartPointer<vtkColorTransferFunction> ctf = vtkSmartPointer<vtkColorTransferFunction>::New();
+    build_ctf(ctf, colorScale.c_str());
+    
     for (int iStop = 0; iStop < colorCount; iStop++) {
         stops[iStop] = minData + iStop * rangeOneColor;
-        colors[iStop] = get_color_in_scale(stops[iStop], minData, maxData - rangeOneColor);
+        colors[iStop] = get_color_in_scale(iStop, colorCount, ctf);
     }
     stops[colorCount] = maxData + 1;
     
