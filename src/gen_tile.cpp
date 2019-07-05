@@ -371,7 +371,7 @@ color get_color_in_scale(int index, int colorCount, vtkSmartPointer<vtkColorTran
     return(c);
 }
 
-void build_ctf(vtkSmartPointer<vtkColorTransferFunction>& ctf, const char *colorScale) {
+void build_ctf(vtkSmartPointer<vtkColorTransferFunction>& ctf, char *colorScale) {
     if (!strcmp(colorScale, "Rainbow")) {
         ctf->SetColorSpaceToRGB();
         ctf->AddRGBPoint(0.00, 0.0, 0.0, 1.0);
@@ -416,7 +416,7 @@ void build_ctf(vtkSmartPointer<vtkColorTransferFunction>& ctf, const char *color
     ctf->SetNanColor(0.7, 0.7, 0.7);
 }
 
-void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos) {
+void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos, char *colorScale) {
     const int colorCount = 256;
     const int maxScaleDenom = 559082264;
     
@@ -437,9 +437,8 @@ void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos) {
     std::vector<double> stops = std::vector<double>(colorCount+1);
     std::vector<color> colors = std::vector<color>(colorCount);
     
-    std::string colorScale("Rainbow");
     vtkSmartPointer<vtkColorTransferFunction> ctf = vtkSmartPointer<vtkColorTransferFunction>::New();
-    build_ctf(ctf, colorScale.c_str());
+    build_ctf(ctf, colorScale);
     
     for (int iStop = 0; iStop < colorCount; iStop++) {
         stops[iStop] = minData + iStop * rangeOneColor;
@@ -493,22 +492,22 @@ void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos) {
     CPLFree(pszProj4);
 }
 
-void load_shapefiles(Map& m, shpmapconfig shpconf) {
+void load_shapefiles(Map& m, shpmapconfig shpconf, char *colorScale) {
     if (strcmp(shpconf.file, "")) {
         std::size_t lvlPos = std::string(shpconf.file).find("{}");
         if (lvlPos == std::string::npos) {
             syslog(LOG_INFO, "load 1 shapefile");
-            load_shapefile(m, shpconf, -1, lvlPos);
+            load_shapefile(m, shpconf, -1, lvlPos, colorScale);
         } else {
             syslog(LOG_INFO, "load %d shapefiles", shpconf.maxzoom - shpconf.minzoom + 1);
             for (int lvl = shpconf.minzoom; lvl <= shpconf.maxzoom; lvl++) {
-                load_shapefile(m, shpconf, lvl, lvlPos);
+                load_shapefile(m, shpconf, lvl, lvlPos, colorScale);
             }
         }
     }
 }
 
-void load_data_layers(Map& m, char * shp_ini) {
+void load_data_layers(Map& m, char * shp_ini, char *colorScale) {
     dictionary *ini = iniparser_load(shp_ini);
     if (ini) {
         int lr_count = iniparser_getnsec(ini);
@@ -562,7 +561,7 @@ void load_data_layers(Map& m, char * shp_ini) {
             }
             
             // Add a layer from a shapefile
-            load_shapefiles(m, shps[section]);
+            load_shapefiles(m, shps[section], colorScale);
             
             if (!strcmp(shps[section].name, "sumatra")) {
                 shpmapconfig shpconf = shps[section];
@@ -615,7 +614,7 @@ void *render_thread(void * arg)
             try {
                 mapnik::load_map(maps[iMaxConfigs].map, maps[iMaxConfigs].xmlfile);
                 // Load all shapefiles to the map
-                load_data_layers(maps[iMaxConfigs].map, maps[iMaxConfigs].shp_ini);
+                load_data_layers(maps[iMaxConfigs].map, maps[iMaxConfigs].shp_ini, maps[iMaxConfigs].xmlname);
                 /* If we have more than 10 rendering threads configured, we need to fix
                  * up the mapnik datasources to support larger postgres connection pools
                  */
