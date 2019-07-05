@@ -46,6 +46,9 @@ AC_SEARCH_LIBS(gethostbyname, resolv nsl)
 AC_SEARCH_LIBS(pow,m)
 AC_SEARCH_LIBS(clock_gettime,[rt posix4])
 AX_LIB_MAPNIK
+AX_LIB_GDAL
+AM_OPTIONS_VTK
+AM_PATH_VTK
 AX_ENABLE_LIBMEMCACHED
 LIBCURL_CHECK_CONFIG
 AC_CHECK_LIB(rados, rados_version, [
