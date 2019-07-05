@@ -372,14 +372,14 @@ color get_color_in_scale(int index, int colorCount, vtkSmartPointer<vtkColorTran
 }
 
 void build_ctf(vtkSmartPointer<vtkColorTransferFunction>& ctf, char *colorScale) {
-    if (!strcmp(colorScale, "Rainbow")) {
+    if (!strcmp(colorScale, "rainbow")) {
         ctf->SetColorSpaceToRGB();
         ctf->AddRGBPoint(0.00, 0.0, 0.0, 1.0);
         ctf->AddRGBPoint(0.25, 0.0, 1.0, 1.0);
         ctf->AddRGBPoint(0.5, 0.0, 1.0, 0.0);
         ctf->AddRGBPoint(0.75, 1.0, 1.0, 0.0);
         ctf->AddRGBPoint(1.0, 1.0, 0.0, 0.0);
-    } else if (!strcmp(colorScale, "GreyRainbow")) {
+    } else if (!strcmp(colorScale, "greyrainbow")) {
         ctf->SetColorSpaceToRGB();
         ctf->AddRGBPoint(0.0, 1.0, 1.0, 1.0);
         ctf->AddRGBPoint(0.005, 1.0, 1.0, 1.0);
@@ -387,21 +387,21 @@ void build_ctf(vtkSmartPointer<vtkColorTransferFunction>& ctf, char *colorScale)
         ctf->AddRGBPoint(0.5, 0.0, 1.0, 0.0);
         ctf->AddRGBPoint(0.75, 1.0, 1.0, 0.0);
         ctf->AddRGBPoint(1.0, 1.0, 0.0, 0.0);
-    } else if (!strcmp(colorScale, "RainbowInv")) {
+    } else if (!strcmp(colorScale, "rainbowinv")) {
         ctf->SetColorSpaceToRGB();
         ctf->AddRGBPoint(0.0, 1.0, 0.0, 0.0);
         ctf->AddRGBPoint(0.25, 1.0, 1.0, 0.0);
         ctf->AddRGBPoint(0.5, 0.0, 1.0, 0.0);
         ctf->AddRGBPoint(0.75, 0.0, 1.0, 1.0);
         ctf->AddRGBPoint(1.00, 0.0, 0.0, 1.0);
-    } else if (!strcmp(colorScale, "SeisSol")) {
+    } else if (!strcmp(colorScale, "seissol")) {
         ctf->SetColorSpaceToRGB();
         ctf->AddRGBPoint(0.0, 1.0, 1.0, 1.0);
         ctf->AddRGBPoint(0.25, 0.0, 1.0, 1.0);
         ctf->AddRGBPoint(0.5, 0.0, 0.0, 1.0);
         ctf->AddRGBPoint(0.75, 1.0, 0.317647, 0.0);
         ctf->AddRGBPoint(1.0, 1.0, 0.0, 0.0);
-    } else if (!strcmp(colorScale, "Kaikoura")) {
+    } else if (!strcmp(colorScale, "kaikoura")) {
         ctf->SetColorSpaceToRGB();
         ctf->AddRGBPoint(0.0, 1.0, 1.0, 1.0);
         ctf->AddRGBPoint(0.01, 92.0/255, 190.0/255, 215.0/255);
@@ -481,8 +481,8 @@ void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos, c
     spatialRef->exportToProj4(&pszProj4);
     l.set_srs(pszProj4);
     int maxLvl, minLvl;
-    maxLvl = lvl == -1? shpconf.maxzoom : lvl;
-    minLvl = lvl == -1? shpconf.minzoom : lvl;
+    maxLvl = lvl == -1? shpconf.maxzoom : lvl * 2 + 1;
+    minLvl = lvl == -1? shpconf.minzoom : lvl * 2;
     l.set_maximum_scale_denominator(maxScaleDenom / std::pow(2, minLvl) * 1.5);
     l.set_minimum_scale_denominator(maxScaleDenom / std::pow(2, maxLvl) * 0.75);
     l.set_datasource(ds);
@@ -499,9 +499,9 @@ void load_shapefiles(Map& m, shpmapconfig shpconf, char *colorScale) {
             syslog(LOG_INFO, "load 1 shapefile");
             load_shapefile(m, shpconf, -1, lvlPos, colorScale);
         } else {
-            syslog(LOG_INFO, "load %d shapefiles", shpconf.maxzoom - shpconf.minzoom + 1);
-            for (int lvl = shpconf.minzoom; lvl <= shpconf.maxzoom; lvl++) {
-                load_shapefile(m, shpconf, lvl, lvlPos, colorScale);
+            syslog(LOG_INFO, "load %d shapefiles", (shpconf.maxzoom - shpconf.minzoom + 1)/2);
+            for (int lvl = shpconf.minzoom; lvl <= shpconf.maxzoom; lvl += 2) {
+                load_shapefile(m, shpconf, lvl/2, lvlPos, colorScale);
             }
         }
     }
