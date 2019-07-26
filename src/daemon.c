@@ -65,9 +65,6 @@ static const char *cmdStr(enum protoCmd c)
     }
 }
 
-
-
-
 void send_response(struct item *item, enum protoCmd rsp, int render_time) {
     struct protocol *req = &item->req;
     struct item *prev;

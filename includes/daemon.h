@@ -44,7 +44,14 @@ typedef struct {
     int num_threads;
 } xmlconfigitem;
 
-
+typedef struct {
+    char name[XMLCONFIG_MAX];
+    char file[PATH_MAX];
+    double upper;
+    double lower;
+    int minzoom;
+    int maxzoom;
+} shpmapconfig;
 
 struct request_queue * render_request_queue;
 
