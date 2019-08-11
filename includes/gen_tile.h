@@ -26,7 +26,7 @@ void *render_thread(void *);
 struct item *fetch_request(void);
 void delete_request(struct item *item);
 void render_init(const char *plugins_dir, const char* font_dir, int font_recurse);
-void get_shp_params(char * shpconf_file, int maxzoom, double * minData, double * maxData);
+void get_shp_set_params(char * shpconf_file, int maxzoom, double * minData, double * maxData);
 
 typedef struct {
     char name[XMLCONFIG_MAX];
@@ -35,7 +35,7 @@ typedef struct {
     double lower;
     int minzoom;
     int maxzoom;
-} shpmapconfig;
+} shpconfig;
 
 typedef struct {
     void * obj;
@@ -43,11 +43,11 @@ typedef struct {
     char * file;
     int minzoom;
     int maxzoom;
-} c_fts;
+} shpset;
 
-void c_fts_init(c_fts * m, shpmapconfig * shpconf);
-void c_fts_delete(c_fts * m);
-void create_fts(double minData, double maxData, char * colorScale, shpmapconfig * shpconf, c_fts * c_ftstyle);
+void shpset_init(shpset * shp_set, shpconfig * shp_conf);
+void shpset_delete(shpset * shp_set);
+void create_shpset(double minData, double maxData, char * colorScale, shpconfig * shp_conf, shpset * shp_set);
 
 #ifdef __cplusplus
 }

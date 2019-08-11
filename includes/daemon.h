@@ -41,8 +41,8 @@ typedef struct {
     int min_zoom;
     int max_zoom;
     int num_threads;
-    c_fts * c_ftstyles;
-    int shp_count;
+    shpset * shp_sets;
+    int num_shpsets;
 } xmlconfigitem;
 
 struct request_queue * render_request_queue;
