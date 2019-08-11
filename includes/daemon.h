@@ -36,22 +36,14 @@ typedef struct {
     char htcpip[PATH_MAX];
     char tile_dir[PATH_MAX];
     char parameterization[PATH_MAX];
-    char shp_ini[PATH_MAX];
     int tile_px_size;
     double scale_factor;
     int min_zoom;
     int max_zoom;
     int num_threads;
+    c_fts * c_ftstyles;
+    int shp_count;
 } xmlconfigitem;
-
-typedef struct {
-    char name[XMLCONFIG_MAX];
-    char file[PATH_MAX];
-    double upper;
-    double lower;
-    int minzoom;
-    int maxzoom;
-} shpmapconfig;
 
 struct request_queue * render_request_queue;
 

@@ -18,6 +18,7 @@
 #include <strings.h>
 #include <syslog.h>
 #include <getopt.h>
+#include <float.h>
 
 #include "render_config.h"
 #include "daemon.h"
@@ -49,6 +50,7 @@ static renderd_config config;
 
 int noSlaveRenders;
 
+char * shp_ini_path;
 
 static const char *cmdStr(enum protoCmd c)
 {
@@ -617,6 +619,77 @@ void *slave_thread(void * arg) {
     return NULL;
 }
 
+shpmapconfig * load_shp_ini(char * shp_ini_path, int * shp_count) {
+    dictionary *ini = iniparser_load(shp_ini_path);
+    shpmapconfig * shps = NULL;
+    *shp_count = 0;
+    if (ini) {
+        int section_count = iniparser_getnsec(ini);
+        shps = malloc(section_count * sizeof(shpmapconfig));
+        syslog(LOG_INFO, "shp INI loaded '%s' with '%d' sections", shp_ini_path, section_count);
+        char buffer[PATH_MAX];
+        for (int section = 0; section < section_count; section++) {
+            char * name = iniparser_getsecname(ini, section);
+            syslog(LOG_ERR, "section name %s", name);
+            if (strlen(name) == 0) { // TODO: check this when the name is left empty
+                syslog(LOG_NOTICE, "empty section name at section %d", section);
+                continue;
+            }
+            if (strlen(name) >= XMLCONFIG_MAX - 1) {
+                syslog(LOG_WARNING, "section name too long: %s", name);
+                continue;
+            }
+            strcpy(shps[*shp_count].name, name);
+            
+            sprintf(buffer, "%s:file", name);
+            char * shp_file = iniparser_getstring(ini, buffer, (char *)"");
+            if (strcmp(shp_file, "") == 0) { // TODO: check this when the field is left empty
+                syslog(LOG_WARNING, "a shp file path is needed at section %d", section);
+                continue;
+            }
+            if (strlen(shp_file) >= PATH_MAX - 1){
+                syslog(LOG_WARNING, "shp file path too long: %s", shp_file);
+                continue;
+            }
+            strcpy(shps[*shp_count].file, shp_file);
+            
+            sprintf(buffer, "%s:upper", name);
+            char * upper = iniparser_getstring(ini, buffer, (char *)"0.0");
+            if (strcmp(upper, "inf")) shps[*shp_count].upper = atof(upper);
+            else shps[*shp_count].upper = -DBL_MAX;
+            
+            sprintf(buffer, "%s:lower", name);
+            char * lower = iniparser_getstring(ini, buffer, (char *)"0.0");
+            if (strcmp(lower, "inf")) shps[*shp_count].lower = atof(lower);
+            else shps[*shp_count].lower = DBL_MAX;
+            
+            sprintf(buffer, "%s:maxzoom", name);
+            int maxzoom = atoi(iniparser_getstring(ini, buffer, (char *)"10"));
+            if (maxzoom > MAX_ZOOM) {
+                syslog(LOG_WARNING, "Specified max zoom (%i) is too large. Only zoom levels up to %i are currently supported. The max zoom is now set to 10.", maxzoom, MAX_ZOOM);
+                maxzoom = 10;
+            }
+            shps[*shp_count].maxzoom = maxzoom;
+
+            sprintf(buffer, "%s:minzoom", name);
+            int minzoom = atoi(iniparser_getstring(ini, buffer, (char *)"0"));
+            if (minzoom < 0) {
+                syslog(LOG_WARNING, "Specified min zoom (%i) is too small. Minimum zoom level has to be at least 0. It is now set to 0.", minzoom);
+                minzoom = 0;
+            }
+            if (minzoom > shps[*shp_count].maxzoom) {
+                syslog(LOG_WARNING, "Specified min zoom (%i) is larger than max zoom (%i). It is now set to max zoom.", minzoom, shps[*shp_count].maxzoom);
+                minzoom = shps[*shp_count].maxzoom;
+            }
+            shps[*shp_count].minzoom = minzoom;
+            
+            (*shp_count)++;
+        }
+    }
+    iniparser_freedict(ini);
+    return shps;
+}
+
 #ifndef MAIN_ALREADY_DEFINED
 int main(int argc, char **argv)
 {
@@ -684,7 +757,7 @@ int main(int argc, char **argv)
         syslog(LOG_ERR, "Failed to initialise request queue");
         exit(1);
     }
-    syslog(LOG_ERR, "Initiating reqyest_queue");
+    syslog(LOG_ERR, "Initiating request_queue");
 
     xmlconfigitem maps[XMLCONFIGS_MAX];
     bzero(maps, sizeof(xmlconfigitem) * XMLCONFIGS_MAX);
@@ -700,12 +773,15 @@ int main(int argc, char **argv)
 
     noSlaveRenders = 0;
 
+    shpmapconfig * shps = NULL;
+    int shp_count = 0;
+    
     int iconf = -1;
     char buffer[PATH_MAX];
     for (int section=0; section < iniparser_getnsec(ini); section++) {
         char *name = iniparser_getsecname(ini, section);
         syslog(LOG_INFO, "Parsing section %s\n", name);
-        if (strncmp(name, "renderd", 7) && strcmp(name, "mapnik")) {
+        if (strncmp(name, "renderd", 7) && strcmp(name, "mapnik") && strcmp(name, "shpini")) {
             if (config.tile_dir == NULL) {
                 fprintf(stderr, "No valid (active) renderd config section available\n");
                 exit(7);
@@ -721,7 +797,6 @@ int main(int argc, char **argv)
                 fprintf(stderr, "XML name too long: %s\n", name);
                 exit(7);
             }
-
             strcpy(maps[iconf].xmlname, name);
             
             sprintf(buffer, "%s:uri", name);
@@ -808,14 +883,6 @@ int main(int argc, char **argv)
             }
             strcpy(maps[iconf].parameterization, ini_parameterize);
 
-            sprintf(buffer, "%s:shpini", name);
-            char *ini_shpinipath = iniparser_getstring(ini, buffer, (char *)"");
-            if (strlen(ini_shpinipath) >= (PATH_MAX - 1)){
-                fprintf(stderr, "Shp INI path too long: %s\n", ini_shpinipath);
-                exit(7);
-            }
-            strcpy(maps[iconf].shp_ini, ini_shpinipath);
-
             /* Pass this information into the rendering threads,
              * as it is needed to configure mapniks number of connections
              */
@@ -867,6 +934,14 @@ int main(int argc, char **argv)
             } else {
                 noSlaveRenders += config_slaves[render_sec].num_threads;
             }
+        } else if (strcmp(name, "shpini") == 0) {
+            sprintf(buffer, "%s:ini", name);
+            shp_ini_path = iniparser_getstring(ini, buffer, (char *)"");
+            if (strlen(shp_ini_path) >= (PATH_MAX - 1)){
+                fprintf(stderr, "Shp INI path too long: %s\n", shp_ini_path);
+                exit(7);
+            }
+            shps = load_shp_ini(shp_ini_path, &shp_count);
         }
     }
 
@@ -908,9 +983,9 @@ int main(int argc, char **argv)
 
     for(iconf = 0; iconf < XMLCONFIGS_MAX; ++iconf) {
         if (maps[iconf].xmlname[0] != 0) {
-         syslog(LOG_INFO, "config map %d:   name(%s) file(%s) uri(%s) htcp(%s) host(%s)",
-                 iconf, maps[iconf].xmlname, maps[iconf].xmlfile, maps[iconf].xmluri,
-                 maps[iconf].htcpip, maps[iconf].host);
+            syslog(LOG_INFO, "config map %d:   name(%s) file(%s) uri(%s) htcp(%s) host(%s)",
+                    iconf, maps[iconf].xmlname, maps[iconf].xmlfile, maps[iconf].xmluri,
+                    maps[iconf].htcpip, maps[iconf].host);
         }
     }
 
@@ -956,6 +1031,22 @@ int main(int argc, char **argv)
         syslog(LOG_INFO, "No stats file specified in config. Stats reporting disabled");
     }
 
+    c_fts * all_shp_styles;
+    all_shp_styles = malloc(XMLCONFIGS_MAX * shp_count * sizeof(*all_shp_styles));
+    double min_data, max_data;
+    for (i = 0; i < shp_count; i++) {
+        get_shp_params(shps[i].file, shps[i].maxzoom, &min_data, &max_data);
+        for (iconf = 0; iconf < XMLCONFIGS_MAX; iconf++) {
+            if (maps[iconf].xmlname[0] != 0 && maps[iconf].xmlfile[0] != 0) {
+                create_fts(min_data, max_data, maps[iconf].xmlname, &shps[i], &all_shp_styles[iconf*shp_count+i]);
+                if (i == 0) {
+                    maps[iconf].c_ftstyles = &all_shp_styles[iconf*shp_count];
+                    maps[iconf].shp_count = shp_count;
+                }
+            }
+        }
+    }
+    
     render_threads = (pthread_t *) malloc(sizeof(pthread_t) * config.num_threads);
 
     for(i=0; i<config.num_threads; i++) {
@@ -985,6 +1076,10 @@ int main(int argc, char **argv)
 
     process_loop(fd);
 
+    free(shps);
+    for (i = 0; i < XMLCONFIGS_MAX * shp_count; i++)
+        c_fts_delete(&all_shp_styles[i]);
+    free(all_shp_styles);
     iniparser_freedict(ini);
     unlink(config.socketname);
     close(fd);

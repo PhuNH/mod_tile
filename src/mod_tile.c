@@ -1813,7 +1813,7 @@ static const char *load_tile_config(cmd_parms *cmd, void *mconfig, const char *c
                 fclose(hini);
                 return "Malformed config file";
             }
-            if ((strcmp(xmlname,"mapnik") == 0) || (strstr(xmlname,"renderd") == xmlname)) {
+            if ((strcmp(xmlname,"mapnik") == 0) || (strstr(xmlname,"renderd") == xmlname) || (strcmp(xmlname,"shpini") == 0)) {
                 /* These aren't tile layers but configuration sections for renderd */
                 tilelayer = 0;
             } else {

@@ -100,18 +100,32 @@ struct xmlmapconfig {
     char xmluri[PATH_MAX];
     char host[PATH_MAX];
     char htcphost[PATH_MAX];
-    char shp_ini[PATH_MAX];
     int htcpsock;
     int tilesize;
     double scale;
     int minzoom;
     int maxzoom;
+    c_fts * c_ftstyles;
+    int shp_count;
     int ok;
     parameterize_function_ptr parameterize_function;
     xmlmapconfig() :
         map(256,256) {}
 };
 
+void c_fts_init(c_fts * m, shpmapconfig * shpconf) {
+    feature_type_style * obj = new feature_type_style();
+    m->obj = obj;
+    m->name = shpconf->name;
+    m->file = shpconf->file;
+    m->minzoom = shpconf->minzoom;
+    m->maxzoom = shpconf->maxzoom;
+}
+
+void c_fts_delete(c_fts * m) {
+    if (m == NULL) return;
+    delete static_cast<feature_type_style *>(m->obj);
+}
 
 struct projectionconfig * get_projection(const char * srs) {
     struct projectionconfig * prj;
@@ -349,6 +363,22 @@ void render_init(const char *plugins_dir, const char* font_dir, int font_dir_rec
     GDALAllRegister();
 }
 
+void get_shp_params(char * shpconf_file, int maxzoom, double * minData, double * maxData) {
+    std::string maxLvlStr = std::to_string(maxzoom/2);
+    std::string fileName(shpconf_file);
+    std::size_t lvlPos = fileName.find("{}");
+    if (lvlPos != std::string::npos) fileName.replace(lvlPos, 2, maxLvlStr);
+    
+    GDALDataset * poDS = (GDALDataset *) GDALOpenEx(fileName.c_str(), GDAL_OF_VECTOR, NULL, NULL, NULL);
+    OGRLayer * poLayer = poDS->GetLayer(0);
+    std::vector<double> myData = std::vector<double>();
+    for (auto& poFeature: poLayer)
+        myData.push_back(poFeature->GetFieldAsDouble(0));
+    
+    *minData = *std::min_element(std::begin(myData), std::end(myData));
+    *maxData = *std::max_element(std::begin(myData), std::end(myData));
+}
+
 color get_color_in_scale(int index, int colorCount, vtkSmartPointer<vtkColorTransferFunction> ctf) {
     double rgb[3];
     ctf->GetColor(1.0 * index / (colorCount - 1), rgb);
@@ -406,23 +436,9 @@ void build_ctf(vtkSmartPointer<vtkColorTransferFunction>& ctf, char *colorScale)
     ctf->SetNanColor(0.7, 0.7, 0.7);
 }
 
-void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos, char *colorScale) {
+void create_fts(double minData, double maxData, char * colorScale, shpmapconfig * shpconf, c_fts * c_ftstyle) {
     const int colorCount = 256;
-    const int maxScaleDenom = 559082264;
     
-    std::string lvlStr = std::to_string(lvl);
-    std::string fileName(shpconf.file);
-    if (lvl != -1) fileName.replace(lvlPos, 2, lvlStr);
-    syslog(LOG_INFO, "use shapefile '%s'", fileName.c_str());
-    
-    GDALDataset * poDS = (GDALDataset *) GDALOpenEx(fileName.c_str(), GDAL_OF_VECTOR, NULL, NULL, NULL);
-    OGRLayer * poLayer = poDS->GetLayer(0);
-    std::vector<double> myData = std::vector<double>();
-    for (auto& poFeature: poLayer)
-        myData.push_back(poFeature->GetFieldAsDouble(0));
-    
-    double  maxData = *std::max_element(std::begin(myData), std::end(myData)),
-            minData = *std::min_element(std::begin(myData), std::end(myData));
     double rangeOneColor = (maxData - minData) / colorCount;
     std::vector<double> stops = std::vector<double>(colorCount+1);
     std::vector<color> colors = std::vector<color>(colorCount);
@@ -436,15 +452,7 @@ void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos, c
     }
     stops[colorCount] = maxData + 1;
     
-    std::ostringstream style_name, layer_name;
-    style_name << shpconf.name << "_style";
-    layer_name << shpconf.name << "_layer";
-    if (lvl != -1) {
-        style_name << "_" << lvlStr;
-        layer_name << "_" << lvlStr;
-    }
-    
-    feature_type_style s;
+    c_fts_init(c_ftstyle, shpconf);
     for (int iColor = 0; iColor < colorCount; iColor++) {
         rule r;
         std::ostringstream stringStream;
@@ -453,131 +461,112 @@ void load_shapefile(Map& m, shpmapconfig shpconf, int lvl, std::size_t lvlPos, c
         r.set_filter(f);
         polygon_symbolizer psym;
         psym.properties[keys::fill] = colors[iColor];
-        if (stops[iColor] <= shpconf.upper || stops[iColor] >= shpconf.lower)
+        if (stops[iColor] <= shpconf->upper || stops[iColor] >= shpconf->lower)
             psym.properties[keys::fill_opacity] = 0.2 + 0.65 * (static_cast<double>(iColor+1) / colorCount);
         else psym.properties[keys::fill_opacity] = 0;
         r.append(std::move(psym));
-        s.add_rule(std::move(r));
+        static_cast<feature_type_style *>(c_ftstyle->obj)->add_rule(std::move(r));
     }
-    m.insert_style(style_name.str(), std::move(s));
+}
+
+void load_shapefile(Map& m, c_fts * c_ftstyle, std::string style_name, std::string fileName, char * pszProj4, int lvl) {
+    const int maxScaleDenom = 559082264;
+    
+    syslog(LOG_INFO, "use shapefile '%s'", fileName.c_str());
+    
+    std::string lvlStr = std::to_string(lvl);
+    std::ostringstream layer_name;
+    layer_name << c_ftstyle->name << "_layer";
+    if (lvl != -1)
+        layer_name << "_" << lvlStr;
+    layer l(layer_name.str());
+    l.set_srs(pszProj4);
     
     parameters p;
     p["type"] = "shape";
     p["file"] = fileName;
     std::shared_ptr<datasource> ds = datasource_cache::instance().create(p);
-    layer l(layer_name.str());
-    OGRSpatialReference *spatialRef = poLayer->GetSpatialRef();
-    char *pszProj4 = NULL;
-    spatialRef->exportToProj4(&pszProj4);
-    l.set_srs(pszProj4);
+    l.set_datasource(ds);
+    
     int maxLvl, minLvl;
-    maxLvl = lvl == -1 || lvl * 2 == shpconf.maxzoom ? shpconf.maxzoom : lvl * 2 + 1;
-    minLvl = lvl == -1 || lvl * 2 < shpconf.minzoom ? shpconf.minzoom : lvl * 2;
+    maxLvl = lvl == -1 || lvl * 2 == c_ftstyle->maxzoom ? c_ftstyle->maxzoom : lvl * 2 + 1;
+    minLvl = lvl == -1 || lvl * 2 < c_ftstyle->minzoom ? c_ftstyle->minzoom : lvl * 2;
     l.set_maximum_scale_denominator(maxScaleDenom / std::pow(2, minLvl) * 1.5);
     l.set_minimum_scale_denominator(maxScaleDenom / std::pow(2, maxLvl) * 0.75);
-    l.set_datasource(ds);
-    l.add_style(style_name.str());
-    m.add_layer(l);
     
-    CPLFree(pszProj4);
+    l.add_style(style_name);
+    m.add_layer(l);
 }
 
-void load_shapefiles(Map& m, shpmapconfig shpconf, char *colorScale) {
-    if (strcmp(shpconf.file, "")) {
-        std::size_t lvlPos = std::string(shpconf.file).find("{}");
+char * get_srs(std::string fileName) {
+    GDALDataset * poDS = (GDALDataset *) GDALOpenEx(fileName.c_str(), GDAL_OF_VECTOR, NULL, NULL, NULL);
+    OGRLayer * poLayer = poDS->GetLayer(0);
+    OGRSpatialReference *spatialRef = poLayer->GetSpatialRef();
+    char * pszProj4 = NULL;
+    spatialRef->exportToProj4(&pszProj4);
+    return pszProj4;
+}
+
+void load_shapefiles(Map& m, c_fts * c_ftstyle) {
+    if (strcmp(c_ftstyle->file, "")) {
+        std::ostringstream style_name;
+        style_name << c_ftstyle->name << "_style";
+        m.insert_style(style_name.str(), *static_cast<feature_type_style *>(c_ftstyle->obj));
+        
+        std::size_t lvlPos = std::string(c_ftstyle->file).find("{}");
         if (lvlPos == std::string::npos) {
+            std::string fileName(c_ftstyle->file);
+            char * pszProj4 = get_srs(fileName);
+            
             syslog(LOG_INFO, "load 1 shapefile");
-            load_shapefile(m, shpconf, -1, lvlPos, colorScale);
+            load_shapefile(m, c_ftstyle, style_name.str(), fileName, pszProj4, -1);
+            
+            CPLFree(pszProj4);
         } else {
-            syslog(LOG_INFO, "load %d shapefiles", shpconf.maxzoom/2 - shpconf.minzoom/2 + 1);
-            for (int lvl = shpconf.maxzoom/2; lvl > shpconf.minzoom/2-1; lvl -= 1) {
-                load_shapefile(m, shpconf, lvl, lvlPos, colorScale);
+            std::string fileName(c_ftstyle->file);
+            std::string lvlStr = std::to_string(c_ftstyle->maxzoom/2);
+            fileName.replace(lvlPos, 2, lvlStr);
+            char * pszProj4 = get_srs(fileName);
+            
+            syslog(LOG_INFO, "load %d shapefiles", c_ftstyle->maxzoom/2 - c_ftstyle->minzoom/2 + 1);
+            for (int lvl = c_ftstyle->maxzoom/2; lvl > c_ftstyle->minzoom/2-1; lvl -= 1) {
+                fileName = c_ftstyle->file;
+                lvlStr = std::to_string(lvl);
+                fileName.replace(lvlPos, 2, lvlStr);
+                load_shapefile(m, c_ftstyle, style_name.str(), fileName, pszProj4, lvl);
             }
+            
+            CPLFree(pszProj4);
         }
     }
 }
 
-void load_data_layers(Map& m, char * shp_ini, char *colorScale) {
-    dictionary *ini = iniparser_load(shp_ini);
-    if (ini) {
-        int lr_count = iniparser_getnsec(ini);
-        shpmapconfig shps[lr_count];
-        syslog(LOG_INFO, "shp INI loaded '%s' with '%d' sections", shp_ini, lr_count);
-        char buffer[PATH_MAX];
-        for (int section = 0; section < lr_count; section++) {
-            char * name = iniparser_getsecname(ini, section);
-            if (strlen(name) >= XMLCONFIG_MAX - 1) {
-                syslog(LOG_ERR, "section name too long: %s", name);
-                request_exit();
-            }
-            strcpy(shps[section].name, name);
+void load_data_layers(Map& m, int shp_count, c_fts * c_ftstyles) {
+    for (int shp = 0; shp < shp_count; shp++) {
+        // Add a layer (or layers) from a group of shapefile(s)
+        load_shapefiles(m, &c_ftstyles[shp]);
+        
+        /*std::size_t lvlPos = std::string(c_ftstyles[shp].file).find("{}");
+        if (lvlPos != std::string::npos) {
+            for (int lvl = c_ftstyles[shp].maxzoom/2; lvl > c_ftstyles[shp].minzoom/2-1; lvl -= 1) {
+                std::ostringstream layer_name;
+                std::string lvlStr = std::to_string(lvl);
+                layer_name << c_ftstyles[shp].name << "_layer_" << lvlStr;
             
-            sprintf(buffer, "%s:file", name);
-            char * shp_file = iniparser_getstring(ini, buffer, (char *)"");
-            if (strlen(shp_file) >= PATH_MAX - 1){
-                syslog(LOG_ERR, "shp file path too long: %s", shp_file);
-                request_exit();
-            }
-            strcpy(shps[section].file, shp_file);
-            
-            sprintf(buffer, "%s:upper", name);
-            char * upper = iniparser_getstring(ini, buffer, (char *)"0.0");
-            if (strcmp(upper, "inf")) shps[section].upper = atof(upper);
-            else shps[section].upper = -DBL_MAX;
-            
-            sprintf(buffer, "%s:lower", name);
-            char * lower = iniparser_getstring(ini, buffer, (char *)"0.0");
-            if (strcmp(lower, "inf")) shps[section].lower = atof(lower);
-            else shps[section].lower = DBL_MAX;
-            
-            sprintf(buffer, "%s:maxzoom", name);
-            char * maxzoom = iniparser_getstring(ini, buffer, (char *)"20");
-            shps[section].maxzoom = atoi(maxzoom);
-            if (shps[section].maxzoom > MAX_ZOOM) {
-                syslog(LOG_ERR, "Specified max zoom (%i) is too large. Renderd currently only supports up to zoom level %i", shps[section].maxzoom, MAX_ZOOM);
-                request_exit();
-            }
-
-            sprintf(buffer, "%s:minzoom", name);
-            char * minzoom = iniparser_getstring(ini, buffer, (char *)"0");
-            shps[section].minzoom = atoi(minzoom);
-            if (shps[section].minzoom < 0) {
-                syslog(LOG_ERR, "Specified min zoom (%i) is too small. Minimum zoom level has to be greater than or equal to 0", shps[section].minzoom);
-                request_exit();
-            }
-            if (shps[section].minzoom > shps[section].maxzoom) {
-                syslog(LOG_ERR, "Specified min zoom (%i) is larger than max zoom (%i).", shps[section].minzoom, shps[section].maxzoom);
-                request_exit();
-            }
-            
-            // Add a layer from a shapefile
-            load_shapefiles(m, shps[section], colorScale);
-            
-            if (!strcmp(shps[section].name, "sumatra")) {
-                shpmapconfig shpconf = shps[section];
-                std::size_t lvlPos = std::string(shpconf.file).find("{}");
-                if (lvlPos == std::string::npos) {
-                    std::ostringstream style_name, layer_name;
-                    style_name << shpconf.name << "_style";
-                    layer_name << shpconf.name << "_layer";
-                
-                    for (long unsigned int lr_idx = 0; lr_idx < m.layer_count(); lr_idx++) {
-                        if (m.get_layer(lr_idx).name().compare(layer_name.str()) == 0) {
-                            layer lr = m.get_layer(lr_idx);
-                            parameters pa = lr.datasource()->params();
-                            syslog(LOG_INFO, "layer '%s' active '%d' queryable '%d' styles size '%zu' style 0 name '%s' max denom. '%f' min denom. '%f'",
-                                lr.name().c_str(), lr.active(), lr.queryable(), lr.styles().size(), lr.styles()[0].c_str(), lr.maximum_scale_denominator(), lr.minimum_scale_denominator());
-                        }
+                for (long unsigned int lr_idx = 0; lr_idx < m.layer_count(); lr_idx++) {
+                    layer lr = m.get_layer(lr_idx);
+                    if (lr.name().compare(layer_name.str()) == 0) {
+                        parameters pa = lr.datasource()->params();
+                        syslog(LOG_INFO, "layer '%s' styles size '%zu' style 0 name '%s' max denom. '%f' min denom. '%f' rules size '%zu'", lr.name().c_str(), lr.styles().size(),
+                               lr.styles()[0].c_str(), lr.maximum_scale_denominator(), lr.minimum_scale_denominator(), m.styles().at(lr.styles()[0]).get_rules().size());
                     }
                 }
             }
-        }
+        }*/
     }
-    iniparser_freedict(ini);
 }
 
-void *render_thread(void * arg)
-{
+void *render_thread(void * arg) {
     xmlconfigitem * parentxmlconfig = (xmlconfigitem *)arg;
     xmlmapconfig maps[XMLCONFIGS_MAX];
     int i,iMaxConfigs;
@@ -593,7 +582,8 @@ void *render_thread(void * arg)
         maps[iMaxConfigs].minzoom = parentxmlconfig[iMaxConfigs].min_zoom;
         maps[iMaxConfigs].maxzoom = parentxmlconfig[iMaxConfigs].max_zoom;
         maps[iMaxConfigs].parameterize_function = init_parameterization_function(parentxmlconfig[iMaxConfigs].parameterization);
-        strcpy(maps[iMaxConfigs].shp_ini, parentxmlconfig[iMaxConfigs].shp_ini);
+        maps[iMaxConfigs].shp_count = parentxmlconfig[iMaxConfigs].shp_count;
+        maps[iMaxConfigs].c_ftstyles = parentxmlconfig[iMaxConfigs].c_ftstyles;
 
         if (maps[iMaxConfigs].store) {
             maps[iMaxConfigs].ok = 1;
@@ -603,7 +593,7 @@ void *render_thread(void * arg)
             try {
                 mapnik::load_map(maps[iMaxConfigs].map, maps[iMaxConfigs].xmlfile);
                 // Load all shapefiles to the map
-                load_data_layers(maps[iMaxConfigs].map, maps[iMaxConfigs].shp_ini, maps[iMaxConfigs].xmlname);
+                load_data_layers(maps[iMaxConfigs].map, maps[iMaxConfigs].shp_count, maps[iMaxConfigs].c_ftstyles);
                 /* If we have more than 10 rendering threads configured, we need to fix
                  * up the mapnik datasources to support larger postgres connection pools
                  */
