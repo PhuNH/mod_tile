@@ -630,8 +630,8 @@ shpconfig * load_shp_ini(char * shp_conf_path, int * num_shpsets) {
         char buffer[PATH_MAX];
         for (int section = 0; section < section_count; section++) {
             char * name = iniparser_getsecname(ini, section);
-            syslog(LOG_ERR, "section name %s", name);
-            if (strlen(name) == 0) { // TODO: check this when the name is left empty
+            syslog(LOG_INFO, "section name %s", name);
+            if (strlen(name) == 0) {
                 syslog(LOG_NOTICE, "empty section name at section %d", section);
                 continue;
             }
@@ -643,7 +643,7 @@ shpconfig * load_shp_ini(char * shp_conf_path, int * num_shpsets) {
             
             sprintf(buffer, "%s:file", name);
             char * shp_file = iniparser_getstring(ini, buffer, (char *)"");
-            if (strcmp(shp_file, "") == 0) { // TODO: check this when the field is left empty
+            if (strcmp(shp_file, "") == 0) {
                 syslog(LOG_WARNING, "a shp file path is needed at section %d", section);
                 continue;
             }
