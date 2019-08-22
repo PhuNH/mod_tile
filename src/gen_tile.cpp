@@ -541,10 +541,15 @@ void load_shapefiles(Map& m, shpset * shp_set) {
     }
 }
 
-void load_data_layers(Map& m, int shp_count, shpset * shp_sets) {
+void load_data_layers(Map& m, char * map_name, int shp_count, shpset * shp_sets) {
+    bool isMapPga = strcmp(map_name, "pga") == 0, isMapPgv = strcmp(map_name, "pgv") == 0,
+         isMapPgd = strcmp(map_name, "pgd") == 0;
     for (int shp = 0; shp < shp_count; shp++) {
-        // Add a layer (or layers) from a group of shapefile(s)
-        load_shapefiles(m, &shp_sets[shp]);
+        // Add a layer (or layers) from a set of shapefile(s)
+        bool isSetPga = strncmp(shp_sets[shp].name, "pga", 3) == 0, isSetPgv = strncmp(shp_sets[shp].name, "pgv", 3) == 0,
+             isSetPgd = strncmp(shp_sets[shp].name, "pgd", 3) == 0;
+        if (isMapPga == isSetPga && isMapPgv == isSetPgv && isMapPgd == isSetPgd)
+            load_shapefiles(m, &shp_sets[shp]);
         
         /*std::size_t lvlPos = std::string(shp_sets[shp].file).find("{}");
         if (lvlPos != std::string::npos) {
@@ -593,7 +598,7 @@ void *render_thread(void * arg) {
             try {
                 mapnik::load_map(maps[iMaxConfigs].map, maps[iMaxConfigs].xmlfile);
                 // Load all shapefiles to the map
-                load_data_layers(maps[iMaxConfigs].map, maps[iMaxConfigs].num_shpsets, maps[iMaxConfigs].shp_sets);
+                load_data_layers(maps[iMaxConfigs].map, maps[iMaxConfigs].xmlname, maps[iMaxConfigs].num_shpsets, maps[iMaxConfigs].shp_sets);
                 /* If we have more than 10 rendering threads configured, we need to fix
                  * up the mapnik datasources to support larger postgres connection pools
                  */
