@@ -543,12 +543,12 @@ void load_shapefiles(Map& m, shpset * shp_set) {
 
 void load_data_layers(Map& m, char * map_name, int shp_count, shpset * shp_sets) {
     bool isMapPga = strcmp(map_name, "pga") == 0, isMapPgv = strcmp(map_name, "pgv") == 0,
-         isMapPgd = strcmp(map_name, "pgd") == 0;
+         isMapPgd = strcmp(map_name, "pgd") == 0, isMapLarge = strcmp(map_name, "large") == 0;
     for (int shp = 0; shp < shp_count; shp++) {
         // Add a layer (or layers) from a set of shapefile(s)
         bool isSetPga = strncmp(shp_sets[shp].name, "pga", 3) == 0, isSetPgv = strncmp(shp_sets[shp].name, "pgv", 3) == 0,
-             isSetPgd = strncmp(shp_sets[shp].name, "pgd", 3) == 0;
-        if (isMapPga == isSetPga && isMapPgv == isSetPgv && isMapPgd == isSetPgd)
+             isSetPgd = strncmp(shp_sets[shp].name, "pgd", 3) == 0, isSetLarge = strcmp(shp_sets[shp].name, "large") == 0;
+        if (isMapPga == isSetPga && isMapPgv == isSetPgv && isMapPgd == isSetPgd && isMapLarge == isSetLarge)
             load_shapefiles(m, &shp_sets[shp]);
         
         /*std::size_t lvlPos = std::string(shp_sets[shp].file).find("{}");
