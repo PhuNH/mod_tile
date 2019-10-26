@@ -33,8 +33,8 @@
 #include "parameterize_style.hpp"
 
 #include <ogrsf_frmts.h>
-#include <vtk/vtkSmartPointer.h>
-#include <vtk/vtkColorTransferFunction.h>
+#include <vtkSmartPointer.h>
+#include <vtkColorTransferFunction.h>
 
 #if SYSTEM_LIBINIPARSER
     #include <iniparser.h>

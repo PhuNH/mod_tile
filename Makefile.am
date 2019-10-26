@@ -17,8 +17,8 @@ man_MANS = docs/renderd.8 docs/render_expired.1 docs/render_list.1 docs/render_o
 
 renderddir = $(sysconfdir)
 renderd_SOURCES = src/daemon.c src/daemon_compat.c src/gen_tile.cpp src/sys_utils.c src/request_queue.c src/cache_expire.c src/metatile.cpp src/parameterize_style.cpp src/protocol_helper.c $(STORE_SOURCES)
-renderd_CXXFLAGS = $(MAPNIK_CFLAGS)
-renderd_LDADD = $(PTHREAD_CFLAGS) $(MAPNIK_LDFLAGS) $(STORE_LDFLAGS) -liniparser -lgdal $(VTK_LDFLAGS) -lvtkCommonCore -lvtkRenderingCore
+renderd_CXXFLAGS = $(MAPNIK_CFLAGS) $(GDAL_CFLAGS) $(VTK_INCLUDES)
+renderd_LDADD = $(PTHREAD_CFLAGS) $(MAPNIK_LDFLAGS) $(STORE_LDFLAGS) -liniparser $(GDAL_LDFLAGS) $(VTK_LDFLAGS) $(VTK_LIBS)
 if !SYSTEM_LIBINIPARSER
     renderd_SOURCES += iniparser3.0b/libiniparser.la
     renderd_LDADD += -Liniparser3.0b/.libs
@@ -35,8 +35,8 @@ render_old_LDADD = $(PTHREAD_CFLAGS)
 #convert_meta_SOURCES = src/dir_utils.c src/store.c src/convert_meta.c
 gen_tile_test_SOURCES = src/gen_tile_test.cpp src/metatile.cpp src/request_queue.c src/protocol_helper.c src/daemon.c src/daemon_compat.c src/gen_tile.cpp src/sys_utils.c src/cache_expire.c src/parameterize_style.cpp $(STORE_SOURCES)
 gen_tile_test_CFLAGS = -DMAIN_ALREADY_DEFINED $(PTHREAD_CFLAGS)
-gen_tile_test_CXXFLAGS = $(MAPNIK_CFLAGS)
-gen_tile_test_LDADD = $(PTHREAD_CFLAGS) $(MAPNIK_LDFLAGS) $(STORE_LDFLAGS) -liniparser -lgdal $(VTK_LDFLAGS) -lvtkCommonCore -lvtkRenderingCore
+gen_tile_test_CXXFLAGS = $(MAPNIK_CFLAGS) $(GDAL_CFLAGS) $(VTK_INCLUDES)
+gen_tile_test_LDADD = $(PTHREAD_CFLAGS) $(MAPNIK_LDFLAGS) $(STORE_LDFLAGS) -liniparser $(GDAL_LDFLAGS) $(VTK_LDFLAGS) $(VTK_LIBS)
 if !SYSTEM_LIBINIPARSER
     gen_tile_test_SOURCES += iniparser3.0b/libiniparser.la
     gen_tile_test_LDADD += -Liniparser3.0b/.libs

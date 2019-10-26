@@ -6,6 +6,7 @@
 # and the AM_PATH_VTK macro is used to detect VTK presence,
 # location and version.
 #
+# Modified from https://github.com/geodynamics/autoconf_cig/blob/master/cit_vtk.m4
 # Modified from http://www.vtk.org/Wiki/VTK_Autoconf
 # Originally by Francesco Montorsi
 #
@@ -13,11 +14,11 @@
 
 ##############################################################################
 #
-# AM_OPTIONS_VTK
+# AX_OPTIONS_VTK
 #
 # Adds the --with-vtk=PATH option to the configure options
 #
-AC_DEFUN([AM_OPTIONS_VTK],[
+AC_DEFUN([AX_OPTIONS_VTK],[
 
     # vtk install prefix
     AC_ARG_WITH([vtk],
@@ -31,7 +32,7 @@ AC_DEFUN([AM_OPTIONS_VTK],[
     AC_ARG_WITH([vtk-suffix],
                 [AC_HELP_STRING(
                     [--with-vtk-suffix],
-                    [Suffix to append to VTK's include directory, e.g., for vtk-5.2/ the suffix is "-5.2"])],
+                    [Suffix to append to VTK's include directory, e.g., for vtk-7.1/ the suffix is "-7.1"])],
                 [vtk_suffix="$withval"],
                 [vtk_suffix=""])
 
@@ -39,41 +40,38 @@ AC_DEFUN([AM_OPTIONS_VTK],[
     AC_ARG_WITH([vtk-version],
                 [AC_HELP_STRING(
                     [--with-vtk-version],
-                    [Version number of VTK library @<:@default=5.2@:>@])],
+                    [Version number of VTK library @<:@default=7.1@:>@])],
                 [vtk_version="$withval"],
-                [vtk_version="5.2"])
-                
-    # for Fedora: only $vtk_version is needed
-    # for Ubuntu: both $vtk_suffix and $vtk_version are needed
+                [vtk_version="7.1"])
 
-    #if test -z "$vtk_suffix"; then
+    if test -z "$vtk_suffix"; then
         #
         # suffix was not specified. use the version number
         # to calculate what it should be
         #
-    #    if test -n "$vtk_version"; then
-    #        vtk_suffix="-$vtk_version"
-    #    fi
+        if test -n "$vtk_version"; then
+            vtk_suffix="-$vtk_version"
+        fi
 
-    #else
+    else
         #
         # suffix was specified. ignore version silently?
         # produce error for now
         #
-    #    if test -n "$vtk_version"; then
-    #        AC_MSG_ERROR([The option --with-vtk-suffix overrides --with-vtk-version. Do not use simultaneously.])
-    #    fi
+        if test -n "$vtk_version"; then
+            AC_MSG_ERROR([The option --with-vtk-suffix overrides --with-vtk-version. Do not use simultaneously.])
+        fi
 
-    #fi
+    fi
 ])
 
 ##############################################################################
 #
-# AM_PATH_VTK([minimum-version], [action-if-found], [action-if-not-found])
+# AX_PATH_VTK([minimum-version], [action-if-found], [action-if-not-found])
 #
 # NOTE: [minimum-version] must be in the form [X.Y.Z]
 #
-AC_DEFUN([AM_PATH_VTK],[
+AC_DEFUN([AX_PATH_VTK],[
 
     dnl do we want to check for VTK?
     if test x$with_vtk = "xyes"; then
@@ -83,6 +81,8 @@ AC_DEFUN([AM_PATH_VTK],[
 
     if test x$with_vtk != "xno"; then
         VTK_PREFIX="$with_vtk"
+
+	if test ! -d "$VTK_PREFIX/include/vtk$vtk_suffix/" ; then vtk_suffix=""; fi
 
         # note: for VTK version 7.0 the file vtkCommonInstantiator.h no longer exists,
         #       but has been renamed to vtkInstantiator.h instead
@@ -121,7 +121,7 @@ AC_DEFUN([AM_PATH_VTK],[
             VTK_INCLUDES="-I$VTK_PREFIX/include/vtk$vtk_suffix"
 
             # note: versions 6+ change library names
-            maj=`echo $vtk_version | sed 's/\([[0-9]]*\).\([[0-9]]*\).\([[0-9]]*\)/\1/'`
+            maj=`echo $vtk_version | sed 's/\([[0-9]]*\).\([[0-9]]*\)/\1/'`
             VTK_MAJOR=$maj
             AC_MSG_NOTICE([VTK version $vtk_version - major version number is $VTK_MAJOR])
             VTK_LDFLAGS=""
@@ -130,6 +130,7 @@ AC_DEFUN([AM_PATH_VTK],[
             if test "${VTK_MAJOR}" -gt "5" ; then
               # for vtk versions 6+
               if test -d "$VTK_PREFIX/lib" ; then VTK_LDFLAGS+="-L$VTK_PREFIX/lib "; fi
+	      if test -d "$VTK_PREFIX/lib/x86_64-linux-gnu" ; then VTK_LDFLAGS+="-L$VTK_PREFIX/lib/x86_64-linux-gnu "; fi
             fi
 
             dnl in order to be able to compile the following test programs,
