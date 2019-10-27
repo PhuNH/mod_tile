@@ -16,7 +16,7 @@
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
 DESC="Mapnik rendering daemon"
 NAME=renderd
-DAEMON=/usr/bin/$NAME
+DAEMON=/usr/local/bin/$NAME
 DAEMON_ARGS=""
 PIDSOCKDIR=/var/run/$NAME
 PIDFILE=$PIDSOCKDIR/$NAME.pid

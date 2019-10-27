@@ -372,7 +372,10 @@ void get_shp_set_params(char * shpconf_file, int maxzoom, double * minData, doub
     GDALDataset * poDS = (GDALDataset *) GDALOpenEx(fileName.c_str(), GDAL_OF_VECTOR, NULL, NULL, NULL);
     OGRLayer * poLayer = poDS->GetLayer(0);
     std::vector<double> myData = std::vector<double>();
-    for (auto& poFeature: poLayer)
+//     for (auto& poFeature: poLayer)
+    OGRFeature *poFeature;
+    poLayer->ResetReading();
+    while( (poFeature = poLayer->GetNextFeature()) != NULL )
         myData.push_back(poFeature->GetFieldAsDouble(0));
     
     *minData = *std::min_element(std::begin(myData), std::end(myData));
