@@ -32,7 +32,7 @@ AC_DEFUN([AX_OPTIONS_VTK],[
     AC_ARG_WITH([vtk-suffix],
                 [AC_HELP_STRING(
                     [--with-vtk-suffix],
-                    [Suffix to append to VTK's include directory, e.g., for vtk-7.1/ the suffix is "-7.1"])],
+                    [Suffix to append to VTK's include directory, e.g., for vtk-6.3/ the suffix is "-6.3"])],
                 [vtk_suffix="$withval"],
                 [vtk_suffix=""])
 
@@ -40,9 +40,9 @@ AC_DEFUN([AX_OPTIONS_VTK],[
     AC_ARG_WITH([vtk-version],
                 [AC_HELP_STRING(
                     [--with-vtk-version],
-                    [Version number of VTK library @<:@default=7.1@:>@])],
+                    [Version number of VTK library @<:@default=6.3@:>@])],
                 [vtk_version="$withval"],
-                [vtk_version="7.1"])
+                [vtk_version="6.3"])
 
     if test -z "$vtk_suffix"; then
         #
